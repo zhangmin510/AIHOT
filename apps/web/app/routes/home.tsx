@@ -1,5 +1,6 @@
 import { SITE, withSubject } from "@aihot/industry/site";
-import { data as withHeaders, redirect, useLoaderData } from "react-router";
+import { data as withHeaders, Link, redirect, useLoaderData } from "react-router";
+import { EVALUATION } from "@aihot/industry/evaluation";
 import type { Route } from "./+types/home";
 import type { TimelineResponse } from "@aihot/contracts/site";
 import { isCategoryKey, isChannelKey } from "@aihot/contracts/taxonomy";
@@ -65,6 +66,16 @@ export default function Home() {
       </div>
 
       {data.hot && <HotTopics entries={data.hot} />}
+
+      <section className="card mt-4 p-5" aria-label="评测前沿阅读指南">
+        <div className="mono text-[11px] font-semibold tracking-widest text-accent">发布 · 评测 · 复现</div>
+        <p className="mt-2 text-[16px] font-semibold leading-relaxed text-ink">{EVALUATION.lead}</p>
+        <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-[13px] text-accent">
+          <Link to="/leaderboard">外部模型榜 →</Link>
+          <Link to="/methodology">评测方法与证据 →</Link>
+        </div>
+        <p className="mt-3 text-[12px] leading-relaxed text-ink-4">尚未发布本站实测。精选分数表示阅读价值，模型榜为外部评测聚合。</p>
+      </section>
 
       <h2 className="mt-6 text-[20px] font-bold text-ink lg:hidden">{filters.tag ? title : "最新精选"}</h2>
       <div className="-mx-4 mt-3 flex items-center gap-2 pl-4 pr-2 lg:hidden">

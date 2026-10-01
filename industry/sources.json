@@ -1,5 +1,5 @@
 {
-  "$comment": "示范信源：首次启动时导入（scripts/seed.ts），已存在的不会被覆盖。之后在后台“信源”里增删改。字段说明见 docs/customize.md。",
+  "$comment": "评测前沿初始信源：seed 仅新增不存在的 ID，不覆盖后台配置；全文默认关闭。外部榜单沿用 leaderboard 模块独立采集。",
   "sources": [
     {
       "id": "rss-openai-news",
@@ -216,111 +216,6 @@
       "syndicate_fulltext": false
     },
     {
-      "id": "rss-the-verge-ai",
-      "name": "The Verge · AI",
-      "kind": "rss",
-      "config": {
-        "feedUrl": "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml",
-        "_aihot": {
-          "initialBackfillLimit": 8
-        }
-      },
-      "tier": "T2",
-      "first_party": false,
-      "owner_entity_id": null,
-      "participation_mode": "editorial",
-      "interval_minutes": 60,
-      "tags": [
-        "媒体"
-      ],
-      "site_fulltext": false,
-      "syndicate_fulltext": false
-    },
-    {
-      "id": "rss-techcrunch-ai",
-      "name": "TechCrunch · AI",
-      "kind": "rss",
-      "config": {
-        "feedUrl": "https://techcrunch.com/category/artificial-intelligence/feed/",
-        "_aihot": {
-          "initialBackfillLimit": 8
-        }
-      },
-      "tier": "T2",
-      "first_party": false,
-      "owner_entity_id": null,
-      "participation_mode": "editorial",
-      "interval_minutes": 60,
-      "tags": [
-        "媒体"
-      ],
-      "site_fulltext": false,
-      "syndicate_fulltext": false
-    },
-    {
-      "id": "rss-ars-technica-ai",
-      "name": "Ars Technica · AI",
-      "kind": "rss",
-      "config": {
-        "feedUrl": "https://arstechnica.com/ai/feed/",
-        "_aihot": {
-          "initialBackfillLimit": 8
-        }
-      },
-      "tier": "T2",
-      "first_party": false,
-      "owner_entity_id": null,
-      "participation_mode": "editorial",
-      "interval_minutes": 60,
-      "tags": [
-        "媒体"
-      ],
-      "site_fulltext": false,
-      "syndicate_fulltext": false
-    },
-    {
-      "id": "rss-mit-tech-review-ai",
-      "name": "MIT Technology Review · AI",
-      "kind": "rss",
-      "config": {
-        "feedUrl": "https://www.technologyreview.com/topic/artificial-intelligence/feed",
-        "_aihot": {
-          "initialBackfillLimit": 8
-        }
-      },
-      "tier": "T2",
-      "first_party": false,
-      "owner_entity_id": null,
-      "participation_mode": "editorial",
-      "interval_minutes": 120,
-      "tags": [
-        "媒体"
-      ],
-      "site_fulltext": false,
-      "syndicate_fulltext": false
-    },
-    {
-      "id": "rss-the-decoder",
-      "name": "The Decoder",
-      "kind": "rss",
-      "config": {
-        "feedUrl": "https://the-decoder.com/feed/",
-        "_aihot": {
-          "initialBackfillLimit": 8
-        }
-      },
-      "tier": "T2",
-      "first_party": false,
-      "owner_entity_id": null,
-      "participation_mode": "editorial",
-      "interval_minutes": 60,
-      "tags": [
-        "媒体"
-      ],
-      "site_fulltext": false,
-      "syndicate_fulltext": false
-    },
-    {
       "id": "rss-simon-willison",
       "name": "Simon Willison",
       "kind": "rss",
@@ -342,44 +237,185 @@
       "syndicate_fulltext": false
     },
     {
-      "id": "rss-import-ai",
-      "name": "Import AI",
-      "kind": "rss",
+      "id": "web-anthropic-news",
+      "name": "Anthropic News",
+      "kind": "web_list",
       "config": {
-        "feedUrl": "https://importai.substack.com/feed",
+        "url": "https://www.anthropic.com/news",
+        "itemSelector": "a[href^=\"/news/\"]",
+        "titleSelector": "[class*=\"__title\"], h2, h3",
+        "publishedAtSelector": "time",
+        "allowUrlPrefixes": [
+          "https://www.anthropic.com/news/"
+        ],
+        "detail": {
+          "maxFetches": 8
+        },
         "_aihot": {
           "initialBackfillLimit": 8
         }
       },
-      "tier": "T2",
-      "first_party": false,
-      "owner_entity_id": null,
+      "tier": "T1",
+      "first_party": true,
+      "owner_entity_id": "anthropic",
       "participation_mode": "editorial",
       "interval_minutes": 180,
       "tags": [
-        "个人",
-        "周刊"
+        "官方",
+        "模型",
+        "Agent"
       ],
       "site_fulltext": false,
       "syndicate_fulltext": false
     },
     {
-      "id": "rss-latent-space",
-      "name": "Latent Space",
-      "kind": "rss",
+      "id": "web-metr-updates",
+      "name": "METR · 评测与研究",
+      "kind": "web_list",
       "config": {
-        "feedUrl": "https://www.latent.space/feed",
+        "url": "https://metr.org/blog/",
+        "itemSelector": ".card-post a[href^=\"/blog/\"]",
+        "titleSelector": ".card-title",
+        "publishedAtSelector": ".card-date",
+        "allowUrlPrefixes": [
+          "https://metr.org/blog/"
+        ],
+        "detail": {
+          "maxFetches": 8
+        },
         "_aihot": {
           "initialBackfillLimit": 8
         }
       },
-      "tier": "T2",
-      "first_party": false,
+      "tier": "T1",
+      "first_party": true,
       "owner_entity_id": null,
       "participation_mode": "editorial",
       "interval_minutes": 180,
       "tags": [
-        "个人"
+        "评测机构",
+        "Agent"
+      ],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "web-epoch-latest",
+      "name": "Epoch AI · 研究与评测",
+      "kind": "web_list",
+      "config": {
+        "url": "https://epoch.ai/latest",
+        "itemSelector": ".button-parent:has(a.cover-link)",
+        "linkSelector": "a.cover-link",
+        "titleSelector": ".button",
+        "allowUrlPrefixes": [
+          "https://epoch.ai/publications/",
+          "https://epoch.ai/data-insights/"
+        ],
+        "detail": {
+          "maxFetches": 8
+        },
+        "_aihot": {
+          "initialBackfillLimit": 8
+        }
+      },
+      "tier": "T1",
+      "first_party": true,
+      "owner_entity_id": null,
+      "participation_mode": "editorial",
+      "interval_minutes": 180,
+      "tags": [
+        "评测机构",
+        "研究"
+      ],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "rss-arxiv-cs-ai",
+      "name": "arXiv · cs.AI",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "https://rss.arxiv.org/rss/cs.AI",
+        "_aihot": {
+          "initialBackfillLimit": 8
+        }
+      },
+      "tier": "T1",
+      "first_party": true,
+      "owner_entity_id": null,
+      "participation_mode": "editorial",
+      "interval_minutes": 180,
+      "tags": [
+        "论文",
+        "研究"
+      ],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "rss-arxiv-cs-lg",
+      "name": "arXiv · cs.LG",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "https://rss.arxiv.org/rss/cs.LG",
+        "_aihot": {
+          "initialBackfillLimit": 8
+        }
+      },
+      "tier": "T1",
+      "first_party": true,
+      "owner_entity_id": null,
+      "participation_mode": "editorial",
+      "interval_minutes": 180,
+      "tags": [
+        "论文",
+        "研究"
+      ],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "rss-inspect-ai-releases",
+      "name": "Inspect AI · Releases",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "https://github.com/UKGovernmentBEIS/inspect_ai/releases.atom",
+        "_aihot": {
+          "initialBackfillLimit": 8
+        }
+      },
+      "tier": "T1",
+      "first_party": true,
+      "owner_entity_id": null,
+      "participation_mode": "editorial",
+      "interval_minutes": 180,
+      "tags": [
+        "GitHub",
+        "评测工具"
+      ],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "rss-swe-bench-releases",
+      "name": "SWE-bench · Releases",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "https://github.com/SWE-bench/SWE-bench/releases.atom",
+        "_aihot": {
+          "initialBackfillLimit": 8
+        }
+      },
+      "tier": "T1",
+      "first_party": true,
+      "owner_entity_id": null,
+      "participation_mode": "editorial",
+      "interval_minutes": 180,
+      "tags": [
+        "GitHub",
+        "基准",
+        "Agent"
       ],
       "site_fulltext": false,
       "syndicate_fulltext": false

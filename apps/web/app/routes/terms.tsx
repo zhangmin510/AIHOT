@@ -2,9 +2,12 @@ import { SITE } from "@aihot/industry/site";
 import { pageMeta } from "../lib/seo";
 import { prepareCopy } from "../lib/site-copy";
 import copy from "@aihot/industry/pages/terms.md?raw";
-import { CopyPage, LegalFooterLinks } from "../features/copy/CopyPage";
+import { CopyPage, LegalFooterLinks, PreviewPolicyNotice } from "../features/copy/CopyPage";
+import { useLoaderData } from "react-router";
 
 const TERMS = prepareCopy(copy);
+
+export function loader() { return { preview: process.env.AIHOT_PREVIEW === "true" }; }
 
 /** Shared caches may keep this page for five minutes. */
 export function headers() {
@@ -16,6 +19,8 @@ export function meta() {
 }
 
 export default function TermsPage() {
+  const { preview } = useLoaderData<typeof loader>();
+  if (preview) return <PreviewPolicyNotice title="使用规则" />;
   return (
     <CopyPage
       doc={TERMS.doc}

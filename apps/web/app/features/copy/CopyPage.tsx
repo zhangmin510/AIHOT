@@ -82,3 +82,11 @@ export function LegalFooterLinks({ links, note }: { links: Array<{ to: string; l
     </div>
   );
 }
+
+export function PreviewPolicyNotice({ title }: { title: string }) {
+  return <article className="py-6">
+    <h1 className="text-[26px] font-bold text-ink">{title} · 预览状态</h1>
+    <p className="mt-4 leading-relaxed text-ink-3">运营主体、联系方式和正式文本尚未确认。此处不发布未经确认的法律模板；本站仅供预览，不表示正式服务已上线。</p>
+    <Link to="/" className="mt-5 inline-block text-accent">回到预览首页</Link>
+  </article>;
+}

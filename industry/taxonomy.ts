@@ -8,12 +8,9 @@
  * 没归上类的资料在日报里放进第一个 key 为 industry 的类别所在的节（没有就放最后一节）。
  */
 export const CATEGORIES = [
-  { key: "ai-models", label: "模型", section: "模型发布/更新", guide: "新模型、模型版本、权重开放、模型能力与价格变化的发布与评测结果" },
-  { key: "ai-products", label: "产品", section: "产品发布/更新", guide: "AI 产品、功能、应用、工具、API 与平台的发布和更新" },
-  { key: "industry", label: "行业", section: "行业动态", guide: "公司经营、融资并购、人事、合作、诉讼、监管与政策、市场与基础设施" },
-  { key: "paper", label: "论文", section: "论文研究", guide: "研究论文、技术报告、基准与数据集" },
-  { key: "tip", label: "教程", section: "技巧与观点", guide: "教程、实践经验、使用技巧、提示词与工具用法、深度技术讲解" },
-  { key: "opinion", label: "观点", section: "技巧与观点", guide: "人物观点、评论、分析、访谈、现象与趋势讨论" },
+  { key: "ai-models", label: "大模型", section: "大模型", guide: "大模型发布、能力边界、模型基准、数据集与评测论文；不以论文形式另分栏目" },
+  { key: "agent", label: "Agent", section: "Agent", guide: "智能体发布、工具调用、编码 Agent、长任务与真实环境评测；涉及 Agent 的基准或方法优先归此栏" },
+  { key: "ai-products", label: "应用评测", section: "应用评测", guide: "AI 应用真实任务比较、质量/成本/延迟测试、可复现工作流与重要产品变化；无实质变化的营销和融资不优先" },
 ] as const;
 
 /**
@@ -32,7 +29,7 @@ export const CATEGORY_TAGS = [
 
 /** 可选的主题标签。 */
 export const TOPIC_TAGS = [
-  "Agent", "编码", "推理", "多模态", "语音", "视频", "图像生成", "RAG", "端侧", "数据/训练", "搜索", "部署/工程", "开源生态", "具身智能", "MCP/工具调用",
+  "厂商声明", "第三方评测", "可复现方法", "Agent", "编码", "推理", "多模态", "语音", "视频", "图像生成", "RAG", "端侧", "数据/训练", "搜索", "部署/工程", "开源生态", "具身智能", "MCP/工具调用",
 ] as const;
 
 /** 可选的实体标签（公司、机构、平台）。 */

@@ -14,6 +14,9 @@
     "fflate": "0.7.5"
   },
   "scripts": {
+    "local:init": "node scripts/local.ts init",
+    "local:setup": "node scripts/local.ts setup",
+    "local:start": "node scripts/local.ts start",
     "db:migrate": "node --env-file-if-exists=.env scripts/migrate.ts",
     "dev:api": "npm run dev -w @aihot/api",
     "dev:worker": "npm run dev -w @aihot/worker",

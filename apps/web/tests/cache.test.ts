@@ -15,6 +15,7 @@ let logs = "";
 let deadline: number;
 let refreshAt: string;
 let metaDelayMs = 0;
+let evidenceTags: string[] | null = null;
 const apiCookies: Array<string | undefined> = [];
 const api = createServer((req, res) => {
   const url = new URL(req.url!, "http://api.local");
@@ -28,9 +29,14 @@ const api = createServer((req, res) => {
     const filters = { channel: "all", category: url.searchParams.get("category"), tag: null, topic: null };
     res.setHeader("X-Accel-Expires", `@${deadline}`);
     res.setHeader("Cache-Control", "public, max-age=30, s-maxage=30");
-    return res.end(JSON.stringify({ filters, cards: [], nextCursor: null, refreshAt, dayCounts: [], hot: null, generatedAt: "2026-09-28T00:00:00Z" }));
+    const cards = evidenceTags === null ? [] : [{ key: "fixture", anchorAt: "2026-09-30T00:00:00Z", group: null, item: { id: "fixture", title: "测试样本", summary: "仅用于自动测试", reason: null, publishedAt: "2026-09-30T00:00:00Z", timelineAt: "2026-09-30T00:00:00Z", category: "ai-models", tags: evidenceTags, score: 99, selected: true, channel: "news", source: { name: "OpenAI 官方 · 第三方评测" }, x: null } }];
+    return res.end(JSON.stringify({ filters, cards, nextCursor: null, refreshAt, dayCounts: [], hot: null, generatedAt: "2026-09-28T00:00:00Z" }));
   }
   if (url.pathname === "/api/site/hot") return res.end(JSON.stringify({ entries: [] }));
+  if (url.pathname.startsWith("/api/site/leaderboard/")) {
+    res.statusCode = 503;
+    return res.end(JSON.stringify({ code: "temporarily_unavailable" }));
+  }
   if (url.pathname === "/api/site/echo-client") return res.end(JSON.stringify({ forwarded: req.headers["x-forwarded-for"], real: req.headers["x-real-ip"] }));
   if (url.pathname === "/api/site/items/long-lived") return res.end(JSON.stringify({ id: "long-lived", title: "t" }));
   if (url.pathname === "/api/site/contact") return res.end(JSON.stringify({ wechatQr: "/qr.png", feishuQr: "/qr.png" }));
@@ -48,7 +54,7 @@ before(async () => {
   api.listen(0, "127.0.0.1");
   await once(api, "listening");
   web = spawn(process.execPath, [fileURLToPath(new URL("../server.ts", import.meta.url))], {
-    env: { ...process.env, WEB_PORT: "0", TRUST_PROXY: "false", API_BASE_URL: `http://127.0.0.1:${(api.address() as AddressInfo).port}` },
+    env: { ...process.env, AIHOT_PREVIEW: "true", WEB_PORT: "0", TRUST_PROXY: "false", API_BASE_URL: `http://127.0.0.1:${(api.address() as AddressInfo).port}` },
     stdio: ["ignore", "pipe", "pipe"],
   });
   await new Promise<void>((resolve, reject) => {
@@ -109,6 +115,59 @@ test("HTML and navigation share freshness; cookies do not personalize public res
   assert.equal(signedIn.headers.get("Set-Cookie"), null);
   assert.equal(await signedIn.text(), await plain.text());
   assert.ok(apiCookies.every((cookie) => !cookie));
+});
+
+test("preview identifies its state and withholds unconfirmed legal templates", async () => {
+  const home = await fetch(origin);
+  assert.equal(home.headers.get("X-Robots-Tag"), "noindex, nofollow");
+  assert.match(await home.text(), /预览站/);
+  for (const route of ["terms", "privacy"]) {
+    const response = await fetch(`${origin}/${route}`);
+    assert.equal(response.status, 200);
+    const body = await response.text();
+    assert.match(body, /预览状态/);
+    assert.match(body, /不发布未经确认的法律模板/);
+    assert.doesNotMatch(body, /生效日期|不出售个人信息|来源方的更正与下架/);
+  }
+});
+
+test("evaluation categories round-trip through SSR and methodology stays readable without scores", async () => {
+  assert.deepEqual(CATEGORY_KEYS, ["ai-models", "agent", "ai-products"]);
+  for (const category of CATEGORY_KEYS) {
+    const response = await fetch(`${origin}/?category=${category}`);
+    assert.equal(response.status, 200);
+    const body = await response.text();
+    assert.match(body, /大模型/);
+    assert.match(body, /应用评测/);
+    assert.ok(body.includes(`category=${category}`));
+    assert.ok(body.includes(`/all?category=${category}&amp;search=1`), "mobile search preserves the selected category");
+  }
+  const method = await fetch(`${origin}/methodology`);
+  assert.equal(method.status, 200);
+  const body = await method.text();
+  for (const label of ["外部榜单聚合", "厂商声明", "第三方评测", "本站实测", "尚未发布", "缺失项明确记录为未提供"]) assert.ok(body.includes(label), label);
+  assert.match(await (await fetch(`${origin}/more`)).text(), /href="\/methodology"/);
+  const board = await fetch(`${origin}/leaderboard`);
+  assert.equal(board.status, 503);
+  assert.match(await board.text(), /暂无可用榜单/);
+});
+
+test("SSR evidence badges use stored tags, never source names, scores or selection", async () => {
+  const render = async (tags: string[]) => {
+    evidenceTags = tags;
+    return (await fetch(`${origin}/`)).text();
+  };
+  try {
+    assert.doesNotMatch(await render([]), /原文证据类型/);
+    const vendor = await render(["模型发布", "厂商声明"]);
+    assert.match(vendor, /aria-label="原文证据类型"/);
+    assert.match(vendor, /href="\/methodology"[^>]*>厂商声明/);
+    assert.doesNotMatch(vendor, /href="\/methodology"[^>]*>第三方评测/);
+    const independent = await render(["评测/基准", "第三方评测", "可复现方法"]);
+    assert.match(independent, /href="\/methodology"[^>]*>第三方评测/);
+    assert.match(independent, /href="\/methodology"[^>]*>可复现方法/);
+    assert.doesNotMatch(await render(["本站实测"]), /原文证据类型/);
+  } finally { evidenceTags = null; }
 });
 
 test("missing routes cannot be hidden by a root-only request; errors and redirects stay uncached", async () => {

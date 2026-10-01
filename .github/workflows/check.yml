@@ -5,7 +5,7 @@ name: Check
 
 on:
   push:
-    branches: [main]
+    branches: [main, eval-frontier]
   pull_request:
   workflow_dispatch:
 

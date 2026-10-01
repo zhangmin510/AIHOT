@@ -1,5 +1,6 @@
 import { SITE, withSubject } from "@aihot/industry/site";
-import { Link, Outlet } from "react-router";
+import { isRouteErrorResponse, Link, Outlet, useRouteError } from "react-router";
+import { EmptyState } from "../components/ui/Page";
 import { BoardTabs } from "../features/leaderboard/BoardTabs";
 import { IconArrowUpRight } from "../components/icons";
 
@@ -10,6 +11,10 @@ export function headers() {
 
 /** Shared frame for the overall and category boards; only the board below it changes. */
 export default function LeaderboardFrame() {
+  return <BoardFrame><Outlet /></BoardFrame>;
+}
+
+function BoardFrame({ children }: { children: React.ReactNode }) {
   const chip = "inline-flex h-8 items-center gap-1 rounded-full border border-line-strong bg-surface px-3.5 text-[12.5px] text-ink-2 transition-colors hover:border-ink-4 hover:text-ink";
   return (
     <div className="pb-10">
@@ -27,10 +32,17 @@ export default function LeaderboardFrame() {
           </Link>
         </div>
       </header>
+      <p className="mb-4 rounded-control bg-bg-sunk px-4 py-3 text-[13px] leading-relaxed text-ink-3">外部榜单聚合 · 以下排名来自评测方公开成绩，共识指数不是正确率。尚未发布本站实测。<Link to="/methodology" className="ml-2 text-accent">证据类型与局限 →</Link></p>
       <div className="-mx-4 px-4 lg:mx-0 lg:px-0">
         <BoardTabs />
       </div>
-      <Outlet />
+      {children}
     </div>
   );
+}
+
+export function ErrorBoundary() {
+  const error = useRouteError();
+  const status = isRouteErrorResponse(error) ? error.status : 500;
+  return <BoardFrame><EmptyState title={status === 404 ? "没有这个榜单" : "暂无可用榜单"} action={<Link to="/methodology" className="mt-4 text-[13px] text-accent">阅读评测方法 →</Link>}>{status === 404 ? "请选择上方的有效栏目。" : "首次计算尚未完成，或评测证据暂不可用。有效结果发布前不展示示例名次或成绩。"}</EmptyState></BoardFrame>;
 }

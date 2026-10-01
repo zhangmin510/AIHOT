@@ -1,0 +1,8 @@
+# Public preview: no admin or feedback submission; no security bypass.
+{$SITE_DOMAIN} {
+	encode zstd gzip
+	header X-Robots-Tag "noindex, nofollow"
+	@private path /admin* /api/admin* /api/auth* /api/feedback* /api/site/feedback*
+	respond @private "Not available in this preview" 404
+	reverse_proxy web:3000
+}

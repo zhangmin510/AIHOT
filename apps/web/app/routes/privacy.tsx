@@ -2,9 +2,12 @@ import { SITE } from "@aihot/industry/site";
 import { pageMeta } from "../lib/seo";
 import { prepareCopy } from "../lib/site-copy";
 import copy from "@aihot/industry/pages/privacy.md?raw";
-import { CopyPage, LegalFooterLinks } from "../features/copy/CopyPage";
+import { CopyPage, LegalFooterLinks, PreviewPolicyNotice } from "../features/copy/CopyPage";
+import { useLoaderData } from "react-router";
 
 const PRIVACY = prepareCopy(copy);
+
+export function loader() { return { preview: process.env.AIHOT_PREVIEW === "true" }; }
 
 /** Shared caches may keep this page for five minutes. */
 export function headers() {
@@ -16,6 +19,8 @@ export function meta() {
 }
 
 export default function PrivacyPage() {
+  const { preview } = useLoaderData<typeof loader>();
+  if (preview) return <PreviewPolicyNotice title="隐私说明" />;
   return (
     <CopyPage
       doc={PRIVACY.doc}

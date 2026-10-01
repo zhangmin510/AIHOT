@@ -19,6 +19,45 @@
   ],
   "topics": [
     {
+      "slug": "third-party-evals",
+      "name": "第三方评测",
+      "group": "genre",
+      "tags": [
+        "第三方评测"
+      ],
+      "definition": "独立作者或机构实际测试的结果，回到任务、版本、参数和局限。",
+      "related": [
+        "benchmarks",
+        "papers"
+      ]
+    },
+    {
+      "slug": "reproducible-methods",
+      "name": "可复现方法",
+      "group": "genre",
+      "tags": [
+        "可复现方法"
+      ],
+      "definition": "公开代码、数据、配置或步骤的评测方法，不代表本站已完成复现。",
+      "related": [
+        "benchmarks",
+        "papers"
+      ]
+    },
+    {
+      "slug": "vendor-claims",
+      "name": "厂商声明",
+      "group": "genre",
+      "tags": [
+        "厂商声明"
+      ],
+      "definition": "厂商发布与自测效果主张，与第三方验证分开阅读。",
+      "related": [
+        "benchmarks",
+        "papers"
+      ]
+    },
+    {
       "slug": "openai",
       "name": "OpenAI / ChatGPT",
       "group": "company",

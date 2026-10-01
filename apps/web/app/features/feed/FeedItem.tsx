@@ -5,6 +5,7 @@ import { Link } from "react-router";
 import { IntentLink } from "../../components/ui/IntentLink";
 import type { GroupInfo, FeedItemSummary, TimelineFilters } from "@aihot/contracts/site";
 import { CATEGORY_LABELS } from "@aihot/contracts/taxonomy";
+import { EVIDENCE_TAGS } from "@aihot/industry/evaluation";
 import { SelectedBadge } from "../../components/ui/Badge";
 import { ScoreLabel } from "../../components/ui/Score";
 import { MediaThumbs, SourceLine, StarButton } from "./parts";
@@ -49,6 +50,12 @@ export const FeedItem = memo(function FeedItem({ item, group, filters, read = fa
           </span>
         </span>
       </header>
+
+      {item.tags.some((tag) => EVIDENCE_TAGS.some((evidence) => evidence === tag)) && (
+        <div className="relative z-10 mt-2 flex flex-wrap gap-2 text-[11px] text-accent" aria-label="原文证据类型">
+          {EVIDENCE_TAGS.filter((tag) => item.tags.includes(tag)).map((tag) => <Link key={tag} to="/methodology" className="rounded-full border border-line px-2 py-0.5">{tag}</Link>)}
+        </div>
+      )}
 
       {isX ? (
         <p className={`mt-2 whitespace-pre-line text-[15px] leading-[1.75] line-clamp-5 lg:line-clamp-4 ${read ? "text-ink-4" : "text-ink"}`}>

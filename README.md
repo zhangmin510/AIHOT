@@ -1,3 +1,5 @@
+> 此 checkout 已定制为 **评测前沿**。安全本地启动与实现范围见 [首版说明](docs/eval-frontier.md)。下文保留原项目介绍与作者署名。
+
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/banner-dark.png">
