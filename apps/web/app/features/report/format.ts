@@ -1,15 +1,25 @@
 // Names, dates and grouping for daily, weekly and monthly reports.
 import type { ReportNavigationEntry, ReportKind } from "@aihot/contracts/site";
-import { beijingWeekday } from "../../lib/format";
+import { beijingWeekday } from "@aihot/contracts/time";
+import { ENABLED_REPORT_KINDS, FEATURES, isReportKindEnabled } from "@aihot/industry/features";
 
-export const KINDS: ReportKind[] = ["daily", "weekly", "monthly"];
+export const KINDS: readonly ReportKind[] = ENABLED_REPORT_KINDS;
 export const KIND_PATH: Record<ReportKind, string> = { daily: "/daily", weekly: "/weekly", monthly: "/monthly" };
 export const KIND_LABEL: Record<ReportKind, string> = { daily: "日报", weekly: "周报", monthly: "月报" };
+export const REPORT_LABEL = KINDS.map((kind) => KIND_LABEL[kind]).join(" / ");
+export const DEFAULT_REPORT_PATH = KIND_PATH[FEATURES.reports.defaultKind];
+
+/** Historical report URLs stay resolvable after a publishing frequency is disabled. */
+export function disabledReportRedirect(pathname: string): string | null {
+  const kind = kindFromPath(pathname);
+  return isReportKindEnabled(kind) ? null : `${DEFAULT_REPORT_PATH}?from=${kind}`;
+}
 
 export function kindFromPath(pathname: string): ReportKind {
   if (pathname.startsWith("/weekly")) return "weekly";
   if (pathname.startsWith("/monthly")) return "monthly";
-  return "daily";
+  if (/^\/daily(?:\/|$)/.test(pathname)) return "daily";
+  return FEATURES.reports.defaultKind;
 }
 
 export function reportPath(kind: ReportKind, key: string): string {
@@ -58,6 +68,12 @@ export interface ArchiveGroup {
   entries: Array<ReportNavigationEntry & { short: string }>;
 }
 
+/** Weeks belong to their Monday's month; count that month's Mondays, including unpublished weeks. */
+function calendarWeek(key: string): { month: string; ordinal: number } {
+  const monday = isoWeekRange(key)[0];
+  return { month: monday.slice(0, 7), ordinal: Math.ceil(Number(monday.slice(8, 10)) / 7) };
+}
+
 /**
  * The archive column: days grouped by month, weeks by the month their Monday falls in ("第2周"),
  * months by year. Newest first, as the index comes.
@@ -70,15 +86,9 @@ export function archiveGroups(kind: ReportKind, index: ReportNavigationEntry[]):
     else groups.push({ id, label, entries: [e] });
   };
   if (kind === "weekly") {
-    const byMonth = new Map<string, string[]>();
     for (const e of index) {
-      const m = isoWeekRange(e.key)[0].slice(0, 7);
-      byMonth.set(m, [...(byMonth.get(m) ?? []), e.key]);
-    }
-    for (const e of index) {
-      const m = isoWeekRange(e.key)[0].slice(0, 7);
-      const weeks = [...byMonth.get(m)!].sort();
-      push(m, `${m.slice(0, 4)} 年 ${Number(m.slice(5))} 月`, { ...e, short: `第${weeks.indexOf(e.key) + 1}周` });
+      const { month, ordinal } = calendarWeek(e.key);
+      push(month, `${month.slice(0, 4)} 年 ${Number(month.slice(5))} 月`, { ...e, short: `第${ordinal}周` });
     }
     return groups;
   }
@@ -100,12 +110,11 @@ export function archiveMark(kind: ReportKind, key: string): { big: string; small
 }
 
 /** Short chip label for the phone switcher: "今天", "9月26日", "9月第2周", "8 月". */
-export function chipLabel(kind: ReportKind, key: string, index: ReportNavigationEntry[], today: string): string {
+export function chipLabel(kind: ReportKind, key: string, _index: ReportNavigationEntry[], today: string): string {
   if (kind === "daily") return key === today ? "今天" : dayLabel(key);
   if (kind === "monthly") return `${Number(key.slice(5, 7))} 月`;
-  const group = archiveGroups("weekly", index).find((g) => g.entries.some((e) => e.key === key));
-  const entry = group?.entries.find((e) => e.key === key);
-  return group && entry ? `${Number(group.id.slice(5))}月${entry.short}` : key;
+  const { month, ordinal } = calendarWeek(key);
+  return `${Number(month.slice(5))}月第${ordinal}周`;
 }
 
 /** "第 N 期": the issue's place in its series, counted from the first report that exists. */
@@ -138,7 +147,7 @@ const METRICS: Array<[key: string, unit: string]> = [
   ["reportsCovered", "期日报"],
 ];
 export function metricItems(metrics: Record<string, number>): Array<{ value: number; unit: string }> {
-  return METRICS.filter(([k]) => typeof metrics[k] === "number" && (k !== "modelsReleased" || metrics[k]! > 0)).map(([k, unit]) => ({ value: metrics[k]!, unit }));
+  return METRICS.filter(([k]) => typeof metrics[k] === "number" && (k !== "modelsReleased" || metrics[k]! > 0) && (k !== "reportsCovered" || isReportKindEnabled("daily"))).map(([k, unit]) => ({ value: metrics[k]!, unit }));
 }
 
 /** "前一日 · 9月25日", "上一期 · 第 37 周", "下一期 · 7 月". */

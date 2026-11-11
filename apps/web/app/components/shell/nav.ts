@@ -2,6 +2,7 @@
 import { withSubject } from "@aihot/industry/site";
 import { FEATURES } from "@aihot/industry/features";
 import type { ReactNode } from "react";
+import { DEFAULT_REPORT_PATH, REPORT_LABEL } from "../../features/report/format";
 import {
   IconApps, IconBolt, IconBookmark, IconChart, IconDoc, IconFlame, IconGrid, IconHeart, IconHistory, IconList, IconMessage, IconPlug,
 } from "../icons";
@@ -23,7 +24,7 @@ export const SIDEBAR: Array<{ title: string; items: NavItem[] }> = [
       { to: "/", label: "精选", icon: IconBolt, end: true },
       { to: "/all", label: `全部${withSubject("动态")}`, icon: IconList },
       { to: "/hot", label: "热点榜", icon: IconFlame },
-      { to: "/daily", label: withSubject("日报"), icon: IconDoc },
+      { to: DEFAULT_REPORT_PATH, label: REPORT_LABEL, icon: IconDoc },
       { to: "/topics", label: "主题", icon: IconGrid },
       { to: "/starred", label: "收藏", icon: IconBookmark },
     ],
@@ -35,6 +36,8 @@ export const SIDEBAR: Array<{ title: string; items: NavItem[] }> = [
           title: "评测",
           items: [
             ...(FEATURES.leaderboard ? [{ to: "/leaderboard", label: "模型榜", icon: IconChart }] : []),
+            ...(FEATURES.leaderboard ? [{ to: "/radar", label: "评测雷达", icon: IconBolt }] : []),
+            { to: "/papers", label: "论文索引", icon: IconDoc },
             { to: "/methodology", label: "评测方法", icon: IconDoc },
             ...(FEATURES.codexResetMonitor ? [{ to: "/codex-reset", label: "Tibo重置监控", icon: IconHistory }] : []),
           ],
@@ -55,16 +58,16 @@ export const SIDEBAR: Array<{ title: string; items: NavItem[] }> = [
 export const TABBAR: NavItem[] = [
   { to: "/", label: "精选", icon: IconBolt, end: true },
   { to: "/all", label: "全部", icon: IconList },
-  { to: "/daily", label: "日报", icon: IconDoc },
+  { to: DEFAULT_REPORT_PATH, label: REPORT_LABEL, icon: IconDoc },
   { to: "/more", label: "更多", icon: IconApps, changelog: true },
 ];
 
 /** Pages reached from the mobile "更多" tab keep that tab highlighted. */
-export const MORE_PATHS = ["/more", "/hot", "/topics", "/starred", "/leaderboard", "/methodology", "/codex-reset", "/agent", "/about", "/changelog", "/feedback", "/terms", "/privacy"];
+export const MORE_PATHS = ["/more", "/hot", "/topics", "/starred", "/leaderboard", "/radar", "/papers", "/methodology", "/codex-reset", "/agent", "/about", "/changelog", "/feedback", "/terms", "/privacy"];
 
 export function tabIsActive(item: NavItem, pathname: string): boolean {
   if (item.end) return pathname === item.to;
   if (item.to === "/more") return MORE_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
-  if (item.to === "/daily") return /^\/(daily|weekly|monthly)(\/|$)/.test(pathname);
+  if (item.to === DEFAULT_REPORT_PATH) return /^\/(daily|weekly|monthly)(\/|$)/.test(pathname);
   return pathname === item.to || pathname.startsWith(`${item.to}/`);
 }

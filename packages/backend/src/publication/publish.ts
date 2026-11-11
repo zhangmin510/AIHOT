@@ -2,6 +2,8 @@
 // manual overrides and grouping, then record selected-set changes in the sync ledger.
 // Rebuilding only re-reads stored results; it never calls a model.
 import { SITE } from "@aihot/industry/site";
+import { CONTENT_SCOPE } from "@aihot/industry/scope";
+import { loadScopeDecision, publicScopeCondition } from "../content/scope.ts";
 import { toPublicApiCategory } from "@aihot/contracts/taxonomy";
 import { config } from "../config.ts";
 import { one, sql, type Tx } from "../db.ts";
@@ -9,12 +11,14 @@ import { sha256, stableJson } from "../lib/ids.ts";
 import { collapseWhitespace } from "../lib/text.ts";
 import { itemUrl } from "./links.ts";
 import { enqueue, QUEUES, shutdownSignal } from "../jobs/queue.ts";
+import { withPublicInsights, type PublicItemInsights } from "./insights.ts";
 import {
   bodyModeOf, channelOf, displayTags, isIndexable, isPoolEligible, isSelectable, mayRedistribute, type SourceFacts,
 } from "./rules.ts";
 
 interface ArticleRow {
   id: string;
+  revision: number;
   source_id: string;
   url: string;
   title: string;
@@ -70,7 +74,7 @@ interface PublicationRow {
   seo_excluded_at: Date | null;
 }
 
-export interface V1ItemPayload {
+export interface V1ItemPayload extends PublicItemInsights {
   id: string;
   title: string;
   originalTitle: string | null;
@@ -147,7 +151,7 @@ export async function publishArticle(articleId: string, options: PublishOptions 
 
 export async function publishArticleTx(tx: Tx, articleId: string, options: PublishOptions = {}): Promise<PublishResult | null> {
   const [article] = await tx<ArticleRow[]>`
-    SELECT id, source_id, url, title, language, published_at, discovered_at, timeline_at, backfill, body_status,
+    SELECT id, revision, source_id, url, title, language, published_at, discovered_at, timeline_at, backfill, body_status,
            body_text, x_post, grouped_at
     FROM articles WHERE id = ${articleId} FOR UPDATE`;
   if (!article) return null;
@@ -160,7 +164,8 @@ export async function publishArticleTx(tx: Tx, articleId: string, options: Publi
   if (!source) return null;
   const [analysis] = await tx<AnalysisRow[]>`
     SELECT id, relevance, category, tags, subjects, title_zh, summary_zh, reason_zh, score, selected
-    FROM analyses WHERE article_id = ${articleId} ORDER BY input_revision DESC, id DESC LIMIT 1`;
+    FROM analyses WHERE article_id = ${articleId} AND (${!CONTENT_SCOPE.requireExplicitPass} OR input_revision = ${article.revision})
+    ORDER BY input_revision DESC, id DESC LIMIT 1`;
   const [override] = await tx<OverrideRow[]>`SELECT fields, visibility FROM editorial_overrides WHERE article_id = ${articleId}`;
   const [membership] = await tx<{ fact_id: number; story_id: number | null }[]>`
     SELECT fa.fact_id, f.story_id FROM fact_articles fa JOIN facts f ON f.id = fa.fact_id
@@ -182,9 +187,11 @@ export async function publishArticleTx(tx: Tx, articleId: string, options: Publi
   const relevance = typeof f.relevance === "string" ? (f.relevance as string) : analysis?.relevance ?? null;
   const judgedSelected = typeof f.selected === "boolean" ? (f.selected as boolean) : analysis?.selected ?? null;
   // Material from an isolated source reaches no public surface at all: not even a detail page.
-  const visibility = source.participation_mode === "isolated" ? "withdrawn" : (override?.visibility ?? "public");
+  const scope = CONTENT_SCOPE.requireExplicitPass ? await loadScopeDecision(articleId, article.revision, tx) : null;
+  const scopePass = !CONTENT_SCOPE.requireExplicitPass || scope?.decision === "PASS";
+  const visibility = !scopePass || source.participation_mode === "isolated" ? "withdrawn" : (override?.visibility ?? "public");
 
-  const eligible = isPoolEligible({ participationMode: source.participation_mode, relevance, title, summary });
+  const eligible = scopePass && isPoolEligible({ participationMode: source.participation_mode, relevance, title, summary });
   const selected = isSelectable(eligible, judgedSelected, source.tier);
   const reason = selected ? pickString(f.reason, analysis?.reason_zh ?? null) : null;
   const hasXPost = !!article.x_post;
@@ -224,8 +231,8 @@ export async function publishArticleTx(tx: Tx, articleId: string, options: Publi
   let sortAt: Date = article.timeline_at;
   if (selected && membership?.fact_id) {
     const [anchor] = await tx<{ t: Date | null }[]>`
-      SELECT min(timeline_at) AS t FROM publications
-      WHERE fact_id = ${membership.fact_id} AND eligible AND visibility = 'public' AND article_id <> ${articleId}`;
+      SELECT min(p.timeline_at) AS t FROM publications p
+      WHERE p.fact_id = ${membership.fact_id} AND p.eligible AND p.visibility = 'public' AND p.article_id <> ${articleId} AND ${publicScopeCondition()}`;
     if (anchor?.t && anchor.t < sortAt) sortAt = anchor.t;
   }
 
@@ -280,6 +287,29 @@ export async function publishArticleTx(tx: Tx, articleId: string, options: Publi
         EXCLUDED.indexable, EXCLUDED.story_id, EXCLUDED.fact_id, EXCLUDED.search_text,
         EXCLUDED.sort_at)`;
 
+  // Retire a narrative in the same commit that corrects or removes its evidence. Lock stories in
+  // order: an in-flight digest either commits before this invalidation or fails its version check.
+  if (previous?.visibility === "public" && previous.eligible &&
+      (visibility !== "public" || !eligible || previous.title !== next.title || previous.summary !== summary ||
+        previous.story_id !== null && previous.story_id !== next.story_id)) {
+    const affected = await tx<{ id: number }[]>`
+      SELECT st.id FROM stories st WHERE st.merged_into IS NULL AND (
+        st.id = ${previous.story_id} OR
+        EXISTS (SELECT 1 FROM facts f JOIN fact_articles fa ON fa.fact_id = f.id WHERE f.story_id = st.id AND fa.article_id = ${articleId}) OR
+        EXISTS (SELECT 1 FROM story_digests d WHERE d.story_id = st.id AND ${articleId} = ANY(d.article_ids)
+          AND d.version = (SELECT max(latest.version) FROM story_digests latest WHERE latest.story_id = st.id))
+      ) ORDER BY st.id FOR UPDATE`;
+    for (const { id } of affected) {
+      await tx`UPDATE stories SET digest = NULL, latest = NULL, digest_updated_at = NULL, summary = NULL,
+        title = CASE WHEN origin = 'manual' THEN title ELSE coalesce((
+          SELECT p.title FROM facts f JOIN fact_articles fa ON fa.fact_id = f.id JOIN publications p ON p.article_id = fa.article_id
+          WHERE f.story_id = ${id} AND p.visibility = 'public' AND p.eligible AND ${publicScopeCondition()}
+          ORDER BY p.first_party DESC, coalesce(p.published_at, p.discovered_at), p.article_id LIMIT 1
+        ), '事件资料已更新') END, version = version + 1, updated_at = now() WHERE id = ${id}`;
+      await enqueue(QUEUES.digest, { storyId: id, afterCorrection: true }, { singletonKey: `story:${id}:correction` }, tx);
+    }
+  }
+
   // The pool search row follows eligibility; its body part only covers full text the site may show.
   if (eligible) {
     const body = bodyMode === "full" ? (article.body_text ?? "").slice(0, 12000).toLowerCase() : "";
@@ -304,10 +334,10 @@ export async function publishArticleTx(tx: Tx, articleId: string, options: Publi
   const [state] = await tx<{ in_set: boolean; payload_hash: string | null }[]>`SELECT in_set, payload_hash FROM selected_state WHERE article_id = ${articleId}`;
   let ledger: "upsert" | "remove" | null = null;
   if (inSet) {
-    const payload = v1Payload({
+    const [payload] = await withPublicInsights([v1Payload({
       articleId, title: next.title, originalTitle, summary, sourceName: source.name, url: article.url,
       publishedAt: article.published_at, discoveredAt: article.discovered_at, category, score: next.score, selected: true, reason,
-    });
+    })], tx, visibleAfter && visibleAfter > now ? visibleAfter : now);
     const payloadHash = sha256(stableJson(payload));
     if (!state || !state.in_set || state.payload_hash !== payloadHash) {
       const visibleAt = visibleAfter && visibleAfter > now ? visibleAfter : now;

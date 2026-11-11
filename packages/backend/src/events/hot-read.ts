@@ -1,6 +1,8 @@
 // Reading the latest published hot ranking. The web shows heat values; machine exits only ranks.
 import type { HotParticipant, HotStripEntry } from "@aihot/contracts/site";
 import { sql } from "../db.ts";
+import { publicScopeCondition } from "../content/scope.ts";
+import { CONTENT_SCOPE } from "@aihot/industry/scope";
 import { proxiedImage, proxiedImageSet } from "../media/imgproxy.ts";
 
 export interface HotEntry {
@@ -54,7 +56,33 @@ async function queryLatestHotRanking(): Promise<HotRanking | null> {
   const [row] = await sql<{ id: number; computed_at: Date; rule_version: string; entries: HotEntry[]; evidence: Record<string, unknown> | null }[]>`
     SELECT id, computed_at, rule_version, entries, evidence FROM hot_rankings WHERE published ORDER BY computed_at DESC LIMIT 1`;
   if (!row) return null;
-  return { id: row.id, computedAt: row.computed_at.toISOString(), ruleVersion: row.rule_version, entries: row.entries, coverage: row.evidence };
+  const ranking = { id: row.id, computedAt: row.computed_at.toISOString(), ruleVersion: row.rule_version, entries: row.entries, coverage: row.evidence };
+  if (!CONTENT_SCOPE.requireExplicitPass || !row.entries.length) return ranking;
+  const reports = await sql<{ story_id: number; public_id: string; id: string; title: string; url: string; source_name: string; tier: string; source_id: string; first_party: boolean; selected: boolean; at: Date }[]>`
+    SELECT DISTINCT ON (f.story_id, p.article_id) f.story_id, st.public_id::text, p.article_id AS id, p.title, p.url,
+      s.id AS source_id, s.name AS source_name, s.tier, p.first_party, p.selected, coalesce(p.published_at, p.discovered_at) AS at
+    FROM facts f JOIN fact_articles fa ON fa.fact_id = f.id JOIN publications p ON p.article_id = fa.article_id
+    JOIN sources s ON s.id = p.source_id JOIN stories st ON st.id = f.story_id
+    WHERE f.story_id = ANY(${row.entries.map(entry => entry.storyId)}::bigint[]) AND st.merged_into IS NULL
+      AND p.visibility = 'public' AND p.eligible AND ${publicScopeCondition()} AND (NOT p.selected OR p.visible_after <= now())
+    ORDER BY f.story_id, p.article_id`;
+  const entries: HotEntry[] = [];
+  for (const storyId of new Set(reports.map(report => Number(report.story_id)))) {
+    const members = reports.filter(report => Number(report.story_id) === storyId);
+    const representative = [...members].sort((a, b) => Number(b.first_party) - Number(a.first_party) || Number(b.selected) - Number(a.selected) || a.at.getTime() - b.at.getTime())[0]!;
+    const sources = [...new Map(members.map(report => [report.source_id, report])).values()];
+    const times = members.map(report => report.at.toISOString()).sort();
+    entries.push({ rank: 0, storyId, storyPublicId: representative.public_id, title: representative.title,
+      // This is a current, approved report set, not a recomputation of the old ranking's heat.
+      heat: 0, trend: "unknown", trendPct: null, badges: [], participantCount: sources.length, sourceCount: sources.length,
+      signalCount: 0, reportCount: members.length, sourceNames: sources.map(source => source.source_name), latestAt: times.at(-1)!, firstReportAt: times[0]!,
+      representativeItemId: representative.id, representativeUrl: representative.url, representativeSource: representative.source_name,
+      participants: sources.map(source => ({ name: source.source_name, kind: "editorial", tier: source.tier })) });
+  }
+  entries.sort((a, b) => b.latestAt.localeCompare(a.latestAt) || a.storyPublicId.localeCompare(b.storyPublicId));
+  entries.forEach((entry, index) => { entry.rank = index + 1; });
+  return { ...ranking, ruleVersion: `${ranking.ruleVersion}:scope-current-reports-no-heat`, entries,
+    coverage: { scopePolicy: `${CONTENT_SCOPE.key}:${CONTENT_SCOPE.version}`, heatUnavailable: true, basis: "current approved report sources; old heat is not reused" } };
 }
 
 // Faces and words change only with the ranking, so they are read once per ranking.
@@ -66,6 +94,7 @@ let extrasCache: { rankingId: number; extras: Extras } | null = null;
 const extrasPending = new Map<number, Promise<Extras>>();
 
 async function readExtras(ranking: HotRanking): Promise<Extras> {
+  if (CONTENT_SCOPE.requireExplicitPass) return { faces: new Map(), texts: new Map() };
   if (extrasCache?.rankingId === ranking.id) return extrasCache.extras;
   const pending = extrasPending.get(ranking.id);
   if (pending) return pending;

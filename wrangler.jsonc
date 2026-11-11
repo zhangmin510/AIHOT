@@ -1,0 +1,30 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "evalfrontier-preview",
+  "main": "deploy/cloudflare/worker.ts",
+  "compatibility_date": "2026-11-04",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": false,
+  "routes": [{ "pattern": "b.zhangmin.name", "custom_domain": true }],
+  "assets": {
+    "directory": "./apps/web/build-cloudflare/client",
+    "binding": "ASSETS",
+    "html_handling": "none",
+    "not_found_handling": "none"
+  },
+  "vars": {
+    "SITE_URL": "https://b.zhangmin.name",
+    "AIHOT_PREVIEW": "true",
+    "CLOUDFLARE_PREVIEW": "true",
+    "COLLECT_ENABLED": "false",
+    "MODEL_CALLS_ENABLED": "false",
+    "CONTENT_DELIVERY_ENABLED": "false",
+    "TELEGRAM_PUSH_ENABLED": "false",
+    "EMAIL_PUSH_ENABLED": "false",
+    "FEISHU_CONTENT_PUSH_ENABLED": "false",
+    "FEISHU_INTERNAL_ENABLED": "false",
+    "INDEXNOW_SUBMIT_ENABLED": "false"
+  },
+  "observability": { "enabled": true, "head_sampling_rate": 0.1 }
+}

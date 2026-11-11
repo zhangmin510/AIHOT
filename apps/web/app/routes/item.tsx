@@ -17,6 +17,7 @@ import { GroupSources } from "../features/feed/ReadingGroup";
 import { StoryFollowups } from "../features/item/StoryFollowups";
 import { MediaGallery } from "../features/item/MediaGallery";
 import { QuotedPost } from "../features/item/QuotedPost";
+import { EvaluationCard } from "../features/item/EvaluationCard";
 import { IconArrowLeft, IconCopy, IconDownload, IconExternal, IconImage, IconMenu, IconShare } from "../components/icons";
 
 const PosterSheet = lazy(() => import("../features/item/PosterSheet"));
@@ -309,6 +310,8 @@ export default function ItemPage() {
               <p className="text-[18px] leading-[1.7] text-ink xl:text-[20px] xl:leading-[1.7]">{item.summary}</p>
             </section>
           )}
+
+          <EvaluationCard evidence={item.evidence} paper={item.paper} />
 
           {item.reason && !summaryOnly && (
             <section className="mt-6 border-t border-line pt-4 lg:hidden">

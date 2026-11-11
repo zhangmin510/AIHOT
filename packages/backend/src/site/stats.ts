@@ -2,9 +2,13 @@
 // ten minutes per process (the page itself is cached for five); an older copy is served while the
 // counts are read again, so no reader waits for the full-table counts.
 import type { SiteStats } from "@aihot/contracts/site";
+import { isReportKindEnabled } from "@aihot/industry/features";
 import { sql } from "../db.ts";
 import { cached } from "../lib/cache.ts";
 import { selectedCondition } from "../publication/items.ts";
+import { publicScopeCondition } from "../content/scope.ts";
+import { CONTENT_SCOPE } from "@aihot/industry/scope";
+import { publicReportCondition } from "../publication/reports.ts";
 
 export type { SiteStats };
 
@@ -14,6 +18,7 @@ const SAMPLE = 180;
 const stats = cached(() => querySiteStats(new Date()), { freshMs: 10 * 60_000, maxStaleMs: 60 * 60_000 });
 
 export function loadSiteStats(): Promise<SiteStats> {
+  if (CONTENT_SCOPE.requireExplicitPass) return querySiteStats(new Date());
   return stats.get();
 }
 
@@ -23,10 +28,10 @@ async function querySiteStats(now: Date): Promise<SiteStats> {
     sql<Array<Omit<SiteStats, "sourceKinds" | "day" | "sampleSources" | "latest"> & { collected: number; selectedDay: number }>>`
       SELECT (SELECT count(*) FROM sources WHERE enabled)::int AS sources,
              (SELECT count(*) FROM sources WHERE enabled AND participation_mode = 'hot_signal')::int AS "heatOnlySources",
-             (SELECT count(*) FROM publications p WHERE p.visibility <> 'withdrawn')::int AS items,
+             (SELECT count(*) FROM publications p WHERE p.visibility <> 'withdrawn' AND ${publicScopeCondition()})::int AS items,
              (SELECT count(*) FROM publications p WHERE ${selectedCondition(now)})::int AS selected,
-             (SELECT count(*) FROM reports WHERE kind = 'daily')::int AS dailies,
-             (SELECT count(*) FROM publications p WHERE p.visibility <> 'withdrawn' AND p.discovered_at > ${dayAgo})::int AS collected,
+             (SELECT count(*) FROM reports WHERE kind = 'daily' AND ${isReportKindEnabled("daily")} AND ${publicReportCondition()})::int AS dailies,
+             (SELECT count(*) FROM publications p WHERE p.visibility <> 'withdrawn' AND ${publicScopeCondition()} AND p.discovered_at > ${dayAgo})::int AS collected,
              (SELECT count(*) FROM publications p WHERE ${selectedCondition(now)} AND p.timeline_at > ${dayAgo})::int AS "selectedDay"`,
     sql<{ kind: string; n: number }[]>`SELECT kind, count(*)::int AS n FROM sources WHERE enabled GROUP BY kind`,
     // A shuffle that holds for the day, so the river keeps its sources between visits.

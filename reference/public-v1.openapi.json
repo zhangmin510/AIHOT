@@ -1841,6 +1841,503 @@
           }
         }
       }
+    },
+    "/api/v1/leaderboard-events": {
+      "get": {
+        "operationId": "leaderboardEvents",
+        "summary": "List protocol-aware leaderboard changes",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 30
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "new_leader",
+                "top10_entry",
+                "new_board",
+                "methodology_change"
+              ]
+            }
+          },
+          {
+            "name": "model",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IfNoneMatch"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Permission-filtered public projection. Match status means deterministic text/quantity matching, not independent reproduction.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeaderboardEventPage"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Unchanged"
+          },
+          "400": {
+            "description": "Invalid filter or cursor"
+          },
+          "404": {
+            "description": "Not public or not found"
+          }
+        }
+      }
+    },
+    "/api/v1/leaderboard-events/{id}": {
+      "get": {
+        "operationId": "leaderboardEvent",
+        "summary": "Read previous and current evidence for one change",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IfNoneMatch"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Permission-filtered public projection. Match status means deterministic text/quantity matching, not independent reproduction.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeaderboardEvent"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Unchanged"
+          },
+          "400": {
+            "description": "Invalid filter or cursor"
+          },
+          "404": {
+            "description": "Not public or not found"
+          }
+        }
+      }
+    },
+    "/api/v1/leaderboard-source-states": {
+      "get": {
+        "operationId": "leaderboardSourceStates",
+        "summary": "Read source permissions and independent fetch/data freshness",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IfNoneMatch"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Permission-filtered public projection. Match status means deterministic text/quantity matching, not independent reproduction.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Unchanged"
+          },
+          "400": {
+            "description": "Invalid filter or cursor"
+          },
+          "404": {
+            "description": "Not public or not found"
+          }
+        }
+      }
+    },
+    "/api/v1/leaderboard-model-history/{slug}": {
+      "get": {
+        "operationId": "leaderboardModelHistory",
+        "summary": "Read history split by source, metric, protocol and configuration",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IfNoneMatch"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Permission-filtered public projection. Match status means deterministic text/quantity matching, not independent reproduction.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "model": {
+                      "type": "object",
+                      "properties": {
+                        "slug": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "slug",
+                        "name"
+                      ]
+                    },
+                    "series": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  },
+                  "required": [
+                    "model",
+                    "series"
+                  ]
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Unchanged"
+          },
+          "400": {
+            "description": "Invalid filter or cursor"
+          },
+          "404": {
+            "description": "Not public or not found"
+          }
+        }
+      }
+    },
+    "/api/v1/papers": {
+      "get": {
+        "operationId": "papers",
+        "summary": "List papers associated across visible source materials and versions",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 30
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            }
+          },
+          {
+            "name": "evaluationType",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "new_benchmark",
+                "evaluation_result",
+                "eval_method",
+                "eval_critique",
+                "safety_eval",
+                "agent_eval"
+              ]
+            }
+          },
+          {
+            "name": "sourceId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IfNoneMatch"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Permission-filtered public projection. Match status means deterministic text/quantity matching, not independent reproduction.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaperPage"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Unchanged"
+          },
+          "400": {
+            "description": "Invalid filter or cursor"
+          },
+          "404": {
+            "description": "Not public or not found"
+          }
+        }
+      }
+    },
+    "/api/v1/papers/{id}": {
+      "get": {
+        "operationId": "paper",
+        "summary": "Read one public paper and visible source versions",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IfNoneMatch"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Permission-filtered public projection. Match status means deterministic text/quantity matching, not independent reproduction.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaperDetail"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Unchanged"
+          },
+          "400": {
+            "description": "Invalid filter or cursor"
+          },
+          "404": {
+            "description": "Not public or not found"
+          }
+        }
+      }
+    },
+    "/api/v1/papers/{id}/history": {
+      "get": {
+        "operationId": "paperHistory",
+        "summary": "Read visible paper version history",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IfNoneMatch"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Permission-filtered public projection. Match status means deterministic text/quantity matching, not independent reproduction.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "paper": {
+                      "$ref": "#/components/schemas/PaperRef"
+                    },
+                    "versions": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PaperVersion"
+                      }
+                    }
+                  },
+                  "required": [
+                    "paper",
+                    "versions"
+                  ]
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Unchanged"
+          },
+          "400": {
+            "description": "Invalid filter or cursor"
+          },
+          "404": {
+            "description": "Not public or not found"
+          }
+        }
+      }
+    },
+    "/api/v1/items/{id}/evidence": {
+      "get": {
+        "operationId": "evaluationEvidence",
+        "summary": "Read checked evaluation fields with source-permission-aware support",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IfNoneMatch"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Permission-filtered public projection. Match status means deterministic text/quantity matching, not independent reproduction.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvaluationEvidence"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Unchanged"
+          },
+          "400": {
+            "description": "Invalid filter or cursor"
+          },
+          "404": {
+            "description": "Not public or not found"
+          }
+        }
+      }
+    },
+    "/api/v1/leaderboard-model-histories": {
+      "get": {
+        "operationId": "leaderboardModelHistories",
+        "summary": "List models with authorised single-source history, independent of aggregate ranking",
+        "responses": {
+          "200": {
+            "description": "Currently permitted models with stored history points",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "slug",
+                          "name",
+                          "sourceCount",
+                          "pointCount"
+                        ],
+                        "properties": {
+                          "slug": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "sourceCount": {
+                            "type": "integer"
+                          },
+                          "pointCount": {
+                            "type": "integer"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Unchanged"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2585,6 +3082,41 @@
           },
           "attribution": {
             "$ref": "#/components/schemas/Attribution"
+          },
+          "evaluationType": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "new_benchmark",
+              "evaluation_result",
+              "eval_method",
+              "eval_critique",
+              "safety_eval",
+              "agent_eval",
+              null
+            ]
+          },
+          "evidence": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvaluationEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "paper": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PaperRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       },
@@ -3561,6 +4093,691 @@
               }
             }
           }
+        ]
+      },
+      "EvaluationEvidence": {
+        "type": "object",
+        "properties": {
+          "evaluationType": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "new_benchmark",
+              "evaluation_result",
+              "eval_method",
+              "eval_critique",
+              "safety_eval",
+              "agent_eval",
+              null
+            ]
+          },
+          "status": {
+            "enum": [
+              "matched",
+              "needs_review"
+            ]
+          },
+          "claims": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "statement": {
+                  "type": "string"
+                },
+                "model": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "modelVersion": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "benchmark": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "benchmarkVersion": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "metric": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "value": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "unit": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "split": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "conditions": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "sampleSize": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "confidenceInterval": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "lower": {
+                          "type": "number"
+                        },
+                        "upper": {
+                          "type": "number"
+                        },
+                        "level": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "lower",
+                        "upper",
+                        "level"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "attribution": {
+                  "enum": [
+                    "vendor",
+                    "third_party",
+                    null
+                  ]
+                },
+                "codeUrl": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "dataUrl": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "dataAvailability": {
+                  "enum": [
+                    "public",
+                    "restricted",
+                    null
+                  ]
+                },
+                "support": {
+                  "type": "object",
+                  "properties": {
+                    "quote": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "start": {
+                      "type": "integer"
+                    },
+                    "end": {
+                      "type": "integer"
+                    },
+                    "label": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "url": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "quote",
+                    "start",
+                    "end",
+                    "label",
+                    "url"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "statement",
+                "model",
+                "modelVersion",
+                "benchmark",
+                "benchmarkVersion",
+                "metric",
+                "value",
+                "unit",
+                "split",
+                "conditions",
+                "sampleSize",
+                "confidenceInterval",
+                "attribution",
+                "codeUrl",
+                "dataUrl",
+                "dataAvailability",
+                "support"
+              ]
+            }
+          },
+          "issues": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "missingFields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "checkedAt": {
+            "type": "string"
+          },
+          "inputRevision": {
+            "type": "integer"
+          },
+          "validationVersion": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "evaluationType",
+          "status",
+          "claims",
+          "issues",
+          "missingFields",
+          "checkedAt",
+          "inputRevision",
+          "validationVersion"
+        ]
+      },
+      "PaperMaterial": {
+        "type": "object",
+        "properties": {
+          "itemId": {
+            "type": "string"
+          },
+          "sourceId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "sourceName": {
+            "type": "string"
+          },
+          "sourceUrl": {
+            "type": "string"
+          },
+          "version": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "discoveredAt": {
+            "type": "string"
+          },
+          "evaluationType": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "itemId",
+          "sourceId",
+          "title",
+          "sourceName",
+          "sourceUrl",
+          "version",
+          "discoveredAt",
+          "evaluationType"
+        ]
+      },
+      "PaperVersion": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "firstSeenAt": {
+            "type": "string"
+          },
+          "materials": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PaperMaterial"
+            }
+          }
+        },
+        "required": [
+          "version",
+          "firstSeenAt",
+          "materials"
+        ]
+      },
+      "Paper": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "arxivId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "canonicalUrl": {
+            "type": "string"
+          },
+          "version": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "latestVersion": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "firstSeenAt": {
+            "type": "string"
+          },
+          "lastSeenAt": {
+            "type": "string"
+          },
+          "materialCount": {
+            "type": "integer"
+          },
+          "evaluationTypes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "arxivId",
+          "title",
+          "canonicalUrl",
+          "version",
+          "latestVersion",
+          "firstSeenAt",
+          "lastSeenAt",
+          "materialCount",
+          "evaluationTypes"
+        ]
+      },
+      "PaperDetail": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Paper"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "materials": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/PaperMaterial"
+                }
+              },
+              "versions": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/PaperVersion"
+                }
+              }
+            },
+            "required": [
+              "materials",
+              "versions"
+            ]
+          }
+        ]
+      },
+      "PaperPage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Paper"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ]
+      },
+      "LeaderboardEventEvidence": {
+        "type": "object",
+        "properties": {
+          "snapshotId": {
+            "type": "string"
+          },
+          "contentHash": {
+            "type": "string"
+          },
+          "protocol": {
+            "type": "string"
+          },
+          "publishedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "url": {
+            "type": "string"
+          },
+          "rank": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "score": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "lowerBound": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "upperBound": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "sampleSize": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "sourceModelName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "configurationKey": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "configurationLabel": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "snapshotId",
+          "contentHash",
+          "protocol",
+          "publishedAt",
+          "url",
+          "rank",
+          "score",
+          "lowerBound",
+          "upperBound",
+          "sampleSize",
+          "sourceModelName",
+          "configurationKey",
+          "configurationLabel"
+        ]
+      },
+      "LeaderboardEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "new_leader",
+              "top10_entry",
+              "new_board",
+              "methodology_change"
+            ]
+          },
+          "sourceKey": {
+            "type": "string"
+          },
+          "sourceName": {
+            "type": "string"
+          },
+          "sourceUrl": {
+            "type": "string"
+          },
+          "metricKey": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "configurationKey": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "slug": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "slug",
+                  "name"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "protocol": {
+            "type": "string"
+          },
+          "previousProtocol": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "comparable",
+              "observation"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "occurredAt": {
+            "type": "string"
+          },
+          "detectedAt": {
+            "type": "string"
+          },
+          "timeBasis": {
+            "enum": [
+              "upstream_publication",
+              "first_observed"
+            ]
+          },
+          "oldEvidence": {
+            "$ref": "#/components/schemas/LeaderboardEventEvidence"
+          },
+          "newEvidence": {
+            "$ref": "#/components/schemas/LeaderboardEventEvidence"
+          },
+          "attribution": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "type",
+          "sourceKey",
+          "sourceName",
+          "sourceUrl",
+          "metricKey",
+          "configurationKey",
+          "model",
+          "protocol",
+          "previousProtocol",
+          "state",
+          "title",
+          "summary",
+          "url",
+          "occurredAt",
+          "detectedAt",
+          "timeBasis",
+          "oldEvidence",
+          "newEvidence",
+          "attribution"
+        ]
+      },
+      "LeaderboardEventPage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LeaderboardEvent"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ]
+      },
+      "PaperRef": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "arxivId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "canonicalUrl": {
+            "type": "string"
+          },
+          "version": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "latestVersion": {
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "arxivId",
+          "title",
+          "canonicalUrl",
+          "version",
+          "latestVersion"
         ]
       }
     }

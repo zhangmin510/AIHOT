@@ -1,15 +1,17 @@
 import { SITE, withSubject } from "@aihot/industry/site";
-import { Link, useLoaderData } from "react-router";
+import { Link, redirect, useLoaderData } from "react-router";
 import type { ReportIndexEntry } from "@aihot/contracts/site";
 import { apiGet } from "../lib/api.server";
 import { pageMeta } from "../lib/seo";
 import { beijingDate, beijingWeekday } from "../lib/format";
 import { ReportLayout } from "../features/report/ReportLayout";
-import { archiveGroups } from "../features/report/format";
+import { archiveGroups, disabledReportRedirect } from "../features/report/format";
 import { Rows, SectionPage } from "../features/report/ReportPaper";
 import { Nameplate } from "../features/report/Nameplate";
 
 export async function loader({ request }: { request: Request }) {
+  const moved = disabledReportRedirect(new URL(request.url).pathname);
+  if (moved) throw redirect(moved, 308);
   const { items: index } = await apiGet<{ items: ReportIndexEntry[] }>("/api/site/reports/daily", { signal: request.signal });
   return { index, today: beijingDate(Date.now()) };
 }

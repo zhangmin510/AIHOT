@@ -43,6 +43,7 @@ const provider = await stub(async (_hit, req) => {
 process.env.DEEPSEEK_BASE_URL = `${provider.url}/v1`;
 process.env.DEEPSEEK_API_KEY = "test-key";
 process.env.GROUP_REVIEW_MODEL = "deepseek-flash";
+process.env.EMBEDDINGS_ENABLED = "false";
 
 let storyId: number;
 let factId: number;

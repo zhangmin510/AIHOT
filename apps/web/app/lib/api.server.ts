@@ -1,8 +1,22 @@
 // Server-side HTTP client for route loaders. The web process never touches the database;
 // SSR reads the api over loopback with keep-alive, one or two requests per page.
 import { data, redirect } from "react-router";
+import { AsyncLocalStorage } from "node:async_hooks";
 
 const API_BASE = process.env.API_BASE_URL || "http://127.0.0.1:3001";
+type ApiFetch = (request: Request) => Promise<Response>;
+const apiRequests = new AsyncLocalStorage<ApiFetch>();
+
+/** One SSR request may read a local HTTP handler instead of the Node API origin. */
+export function runWithApiFetch<T>(fetcher: ApiFetch, callback: () => T): T {
+  return apiRequests.run(fetcher, callback);
+}
+
+export function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  if (!path.startsWith("/") || path.startsWith("//")) throw new TypeError("API paths must be site-relative");
+  const fetcher = apiRequests.getStore();
+  return fetcher ? fetcher(new Request(`${API_BASE}${path}`, init)) : fetch(`${API_BASE}${path}`, init);
+}
 
 export class ApiError extends Error {
   readonly status: number;
@@ -17,7 +31,7 @@ export class ApiError extends Error {
 }
 
 export async function apiGet<T>(path: string, init?: { signal?: AbortSignal; headers?: Record<string, string>; responseHeaders?: Headers }): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await apiFetch(path, {
     headers: { accept: "application/json", "x-aihot-ssr": "1", ...init?.headers },
     signal: init?.signal ? AbortSignal.any([init.signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000),
   });
@@ -50,12 +64,7 @@ export async function loadOr404<T>(path: string, opts: { busyRedirect?: string; 
   }
 }
 
-export function queryString(params: Record<string, string | number | null | undefined>): string {
-  const sp = new URLSearchParams();
-  for (const [k, v] of Object.entries(params)) if (v !== null && v !== undefined && v !== "") sp.set(k, String(v));
-  const s = sp.toString();
-  return s ? `?${s}` : "";
-}
+export { queryString } from "./query.ts";
 
 /**
  * Cache headers for a page of selected items: shared caches keep it at most `maxSeconds`, and never

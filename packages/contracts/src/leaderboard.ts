@@ -1,5 +1,6 @@
 // First-party leaderboard DTOs (/api/site/leaderboard*). Not a public API.
 import type { LeaderboardBoardKey } from "./taxonomy.ts";
+import type { LeaderboardSourcePolicy, LeaderboardSourceFreshness } from "./radar.ts";
 
 /** HIGH 较充分 · MEDIUM 持续积累 · LOW 证据敏感. */
 export type LbConfidence = "HIGH" | "MEDIUM" | "LOW";
@@ -189,6 +190,8 @@ export interface LbSourceSummary {
   status: LbSourceStatus;
   brand: LbBrand | null;
   budget: number | null;
+  policy?: LeaderboardSourcePolicy;
+  freshness?: LeaderboardSourceFreshness;
 }
 
 export interface LbSourceGroup {

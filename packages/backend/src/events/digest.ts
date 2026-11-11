@@ -3,11 +3,12 @@
 import { z } from "zod";
 import { modelFor } from "../editorial/models.ts";
 import { beijingDate, beijingTime } from "@aihot/contracts/time";
-import { sql } from "../db.ts";
+import { sql, type Db } from "../db.ts";
 import { chatJson } from "../providers/llm.ts";
 import { completeReceipt } from "../providers/receipts.ts";
 import { sha256, stableJson } from "../lib/ids.ts";
 import { promptText, promptVersion } from "../editorial/prompts.ts";
+import { publicScopeCondition } from "../content/scope.ts";
 
 export const DIGEST_PROMPT_VERSION = promptVersion("story-digest");
 
@@ -18,6 +19,25 @@ const Schema = z.object({
   digest: z.string().min(10).max(2000),
   latest: z.string().max(300).catch(""),
 });
+
+interface DigestReport {
+  id: string; title: string; summary: string | null; source_name: string; first_party: boolean; at: Date;
+}
+
+async function digestReports(db: Db, storyId: number): Promise<DigestReport[]> {
+  return db<DigestReport[]>`
+    SELECT DISTINCT ON (p.article_id) p.article_id AS id, p.title, p.summary, s.name AS source_name, p.first_party,
+      coalesce(p.published_at, p.discovered_at) AS at
+    FROM facts f JOIN fact_articles fa ON fa.fact_id = f.id JOIN publications p ON p.article_id = fa.article_id
+    JOIN sources s ON s.id = p.source_id
+    WHERE f.story_id = ${storyId} AND p.visibility = 'public' AND p.eligible AND ${publicScopeCondition()}
+    ORDER BY p.article_id`;
+}
+
+function reportsHash(reports: DigestReport[]): string {
+  return sha256(stableJson([...reports].sort((a, b) => a.id.localeCompare(b.id))
+    .map((r) => [r.id, r.title, r.summary ?? "", r.source_name, r.first_party, r.at.toISOString()])));
+}
 
 export function storyStatusFor(latestAt: Date | null, now = Date.now()): "active" | "watching" | "settled" {
   if (!latestAt) return "settled";
@@ -32,26 +52,20 @@ export async function composeStoryDigest(storyId: number, opts: { afterCorrectio
   const [story] = await sql<{ id: number; title: string; digest: string | null; version: number; origin: string }[]>`
     SELECT id, title, digest, version, origin FROM stories WHERE id = ${storyId} AND merged_into IS NULL`;
   if (!story) return { updated: false };
-  const reports = await sql<{ id: string; title: string; summary: string | null; source_name: string; first_party: boolean; at: Date }[]>`
-    SELECT DISTINCT ON (p.article_id) p.article_id AS id, p.title, p.summary, s.name AS source_name, p.first_party,
-      coalesce(p.published_at, p.discovered_at) AS at
-    FROM facts f JOIN fact_articles fa ON fa.fact_id = f.id JOIN publications p ON p.article_id = fa.article_id
-    JOIN sources s ON s.id = p.source_id
-    WHERE f.story_id = ${storyId} AND p.visibility = 'public' AND p.eligible
-    ORDER BY p.article_id`;
+  const reports = await digestReports(sql, storyId);
   if (reports.length === 0) return { updated: false };
   reports.sort((a, b) => a.at.getTime() - b.at.getTime());
   const ids = reports.map((r) => r.id).sort();
   // What this version is written from: the reports and what they currently say (corrections included).
-  const inputsHash = sha256(stableJson([...reports].sort((a, b) => a.id.localeCompare(b.id)).map((r) => [r.id, r.title, r.summary ?? ""])));
+  const inputsHash = reportsHash(reports);
   const [last] = await sql<{ article_ids: string[]; inputs_hash: string | null }[]>`
     SELECT article_ids, inputs_hash FROM story_digests WHERE story_id = ${storyId} ORDER BY version DESC LIMIT 1`;
   const sameReports = !!last && JSON.stringify([...last.article_ids].sort()) === JSON.stringify(ids);
   // Versions written before inputs were recorded compare by report set only.
-  if (sameReports && (last!.inputs_hash === inputsHash || (last!.inputs_hash === null && !opts.afterCorrection))) return { updated: false };
-  // Same reports, different content: an editor corrected one. Rewrite from the reports as they are now,
-  // without the previous digest, so a corrected fact does not survive as "earlier reports said".
-  const corrected = sameReports;
+  if (story.digest && sameReports && (last!.inputs_hash === inputsHash || (last!.inputs_hash === null && !opts.afterCorrection))) return { updated: false };
+  // Corrections and removed reports must be rewritten without the previous digest, so invalidated
+  // evidence cannot survive as "earlier reports said" when the remaining reports are still public.
+  const corrected = !!opts.afterCorrection || sameReports || !!last && (!story.digest || last.article_ids.some(id => !ids.includes(id)));
   const known = new Set(last?.article_ids ?? []);
 
   const lines = reports.slice(-40).map((r) => `${corrected || known.has(r.id) ? "" : "【新】"}${beijingDate(r.at)} ${beijingTime(r.at)}｜${r.source_name}${r.first_party ? "（一手）" : ""}｜${r.title}｜${(r.summary ?? "").slice(0, 220)}`);
@@ -64,6 +78,15 @@ export async function composeStoryDigest(storyId: number, opts: { afterCorrectio
   });
   const version = story.version + 1;
   await sql.begin(async (tx) => {
+    // No lock is held during the paid request. Publication corrections take this same story row
+    // lock when invalidating a digest, so either our snapshot still wins or the job retries.
+    const [current] = await tx<{ version: number; title: string; digest: string | null; merged_into: number | null }[]>`
+      SELECT version, title, digest, merged_into FROM stories WHERE id = ${storyId} FOR UPDATE`;
+    if (!current || current.merged_into || current.version !== story.version || current.title !== story.title || current.digest !== story.digest ||
+        reportsHash(await digestReports(tx, storyId)) !== inputsHash) {
+      // chatJson has already saved the answer as received; retrying never loses that receipt.
+      throw new Error("Story digest inputs changed; retry with current reports");
+    }
     await tx`INSERT INTO story_digests (story_id, version, digest, latest, receipt_id, article_ids, inputs_hash)
              VALUES (${storyId}, ${version}, ${res.data.digest}, ${res.data.latest || null}, ${res.receiptId}, ${ids}, ${inputsHash})`;
     await tx`UPDATE stories SET digest = ${res.data.digest}, latest = ${res.data.latest || null}, digest_updated_at = now(),

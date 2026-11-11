@@ -20,6 +20,8 @@ import type {
   LbStability,
 } from "@aihot/contracts/leaderboard";
 import { sql } from "../db.ts";
+import type { LeaderboardSourcePolicy } from "@aihot/contracts/radar";
+import { defaultSourcePolicy, loadSourceStates, sourcePolicies } from "./policy.ts";
 import { boardSubset, modelAccess } from "./access.ts";
 import {
   BOARD_COPY,
@@ -112,6 +114,8 @@ interface RunView {
   sourceWeights: Map<string, number>;
   budgets: Array<{ key: string; name: string; weight: number }>;
   anchors: string[];
+  sourceKeys: string[];
+  policies: Map<string, LeaderboardSourcePolicy>;
 }
 
 export class NoLeaderboardRun extends Error {}
@@ -125,9 +129,8 @@ async function latestRunId(): Promise<string | null> {
   return row?.id ?? null;
 }
 
-/** The latest published run, re-checked at most once a minute. */
+/** Rankings are cached; current source permissions are checked on every public read. */
 export async function runView(): Promise<RunView> {
-  if (cached && Date.now() - cached.checkedAt < 60_000) return cached.view;
   loading ??= refreshRunView().finally(() => { loading = null; });
   return loading;
 }
@@ -135,11 +138,12 @@ export async function runView(): Promise<RunView> {
 async function refreshRunView(): Promise<RunView> {
   const id = await latestRunId();
   if (!id) throw new NoLeaderboardRun("no published leaderboard run");
-  if (cached && cached.view.info.id === id) {
-    cached.checkedAt = Date.now();
-    return cached.view;
-  }
-  const view = await buildRunView(id);
+  const view = cached?.view.info.id === id ? cached.view : await buildRunView(id);
+  const policies = await sourcePolicies(view.sourceKeys);
+  if (view.sourceKeys.some((key) => !policies.get(key)!.publicDerived)) throw new NoLeaderboardRun("published run contains a source without current public-derived permission");
+  const corrected = await sql`SELECT id FROM lb_alias_reviews WHERE source_key=ANY(${view.sourceKeys}) AND previous_model_id IS DISTINCT FROM model_id AND reviewed_at>${view.info.generatedAt}::timestamptz LIMIT 1`;
+  if (corrected.length) throw new NoLeaderboardRun("published run predates a model identity correction");
+  view.policies = policies;
   cached = { view, checkedAt: Date.now() };
   return view;
 }
@@ -221,6 +225,8 @@ async function buildRunView(runId: string): Promise<RunView> {
 
   const sourceWeights = new Map<string, number>();
   for (const s of summary.sources ?? []) sourceWeights.set(s.key, Number(s.weight));
+  const snapshotSources = await sql<{source_key:string}[]>`SELECT DISTINCT source_key FROM lb_snapshots WHERE id=ANY(${run.source_snapshot_ids ?? []})`;
+  const sourceKeys = [...new Set([...snapshotSources.map((source) => source.source_key), ...[...boards.values()].flatMap((board) => Object.keys(board.registry).map(sourceKeyOfUnit))])];
 
   return {
     info,
@@ -234,6 +240,8 @@ async function buildRunView(runId: string): Promise<RunView> {
     sourceWeights,
     budgets: summary.budgets ?? [],
     anchors: inputs.get("overall")?.anchors ?? [],
+    sourceKeys,
+    policies: new Map(),
   };
 }
 
@@ -351,6 +359,7 @@ export async function loadModel(slug: string): Promise<LbModelDetail | null> {
   const itemsBySource = new Map<string, LbEvidenceItem>();
   for (const [unit] of units) {
     const sourceKey = sourceKeyOfUnit(unit);
+    if (!view.policies.get(sourceKey)?.publicRows) continue;
     const reg = registrySource(sourceKey);
     const signal = overall!.signals.get(unit)!.get(slug)!;
     const meta = view.evidence[`${unit}:${slug}`];
@@ -421,7 +430,7 @@ function nearbyComparisons(view: RunView, board: BoardView, slug: string, rank: 
   return ranked.map(({ c, other }) => {
     const om = view.modelsById.get(other.model_id)!;
     const rows = Object.entries(board.registry)
-      .filter(([unit, r]) => r.weight > 0 && board.signals.get(unit)?.has(slug) && board.signals.get(unit)?.has(c.slug))
+      .filter(([unit, r]) => view.policies.get(sourceKeyOfUnit(unit))?.publicRows && r.weight > 0 && board.signals.get(unit)?.has(slug) && board.signals.get(unit)?.has(c.slug))
       .map(([unit, r]) => {
         const rowsOf = board.signals.get(unit)!;
         const format = signalFormat(unit, board);
@@ -454,24 +463,27 @@ function sourceSummary(view: RunView, key: string): LbSourceSummary | null {
   const reg = registrySource(key);
   if (!reg) return null;
   const s = reg.source;
+  const policy = view.policies.get(key) ?? defaultSourcePolicy(key);
   return {
     key: s.key,
     name: s.name,
     operator: s.operator,
     description: s.description,
-    status: s.status,
+    status: s.status === "ranked" && !policy.publicDerived ? "observing" : s.status,
     brand: sourceBrand(s),
     budget: s.status === "ranked" || s.status === "awaiting" ? view.sourceWeights.get(s.key) ?? null : null,
+    policy,
   };
 }
 
 export async function loadSources(): Promise<LbSourcesResponse> {
   const view = await runView();
+  const states = new Map((await loadSourceStates()).map((state) => [state.sourceKey,state]));
   const groups = SOURCE_GROUPS.map((g) => ({
     key: g.key,
     name: g.name,
     blurb: g.blurb,
-    sources: g.sources.map((s) => sourceSummary(view, s.key)!),
+    sources: g.sources.map((s) => ({...sourceSummary(view,s.key)!,policy:states.get(s.key)?.policy,freshness:states.get(s.key)?.freshness})),
   }));
   const all = groups.flatMap((g) => g.sources);
   return { run: view.info, rankedCount: all.filter((s) => s.status === "ranked").length, totalCount: all.length, groups };
@@ -485,12 +497,13 @@ export async function loadSource(key: string): Promise<LbSourceDetail | null> {
   const view = await runView();
   const summary = sourceSummary(view, key)!;
   const s = reg.source;
+  const [state] = await loadSourceStates([key]);
 
   const snapshots = await sql<{ id: string; published_at: Date | null; fetched_at: Date; metadata: Record<string, unknown> }[]>`
     SELECT id, published_at, fetched_at, metadata FROM lb_snapshots WHERE source_key = ${key}
     ORDER BY (id = ANY(${view.snapshotIds})) DESC, fetched_at DESC LIMIT 1`;
   const snapshot = snapshots[0] ?? null;
-  const showRows = !!snapshot && PUBLIC_ROW_STATUSES.has(s.status);
+  const showRows = !!snapshot && state!.policy.publicRows && PUBLIC_ROW_STATUSES.has(s.status);
 
   let rows: LbSourceRow[] = [];
   if (showRows) {
@@ -511,11 +524,12 @@ export async function loadSource(key: string): Promise<LbSourceDetail | null> {
       modelSlug: view.pageSlugs.has(r.slug) ? r.slug : null,
     }));
   }
-  const lastSeen = typeof snapshot?.metadata.lastSeenAt === "string" ? snapshot.metadata.lastSeenAt : null;
   return {
     run: view.info,
     source: {
       ...summary,
+      policy: state!.policy,
+      freshness: state!.freshness,
       fullName: s.fullName ?? s.name,
       area: s.area ?? null,
       group: { key: reg.group.key, name: reg.group.name },
@@ -526,8 +540,8 @@ export async function loadSource(key: string): Promise<LbSourceDetail | null> {
       license: s.license,
       attribution: s.attribution ?? `成绩由 ${s.operator} 发布，原始分数与 ${SITE.name} 共识分使用不同尺度，不能直接相加。`,
     },
-    upstreamAt: showRows ? snapshot.published_at?.toISOString() ?? null : null,
-    syncedAt: showRows ? lastSeen ?? snapshot.fetched_at.toISOString() : null,
+    upstreamAt: state!.freshness.upstreamPublishedAt,
+    syncedAt: state!.freshness.lastSuccessAt,
     collected: showRows,
     rows,
     systemRows: !!s.allRows,

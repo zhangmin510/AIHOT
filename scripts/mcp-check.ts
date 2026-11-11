@@ -58,7 +58,9 @@ try {
   await call(T.hot, { limit: 3 });
 
   // Exercise the remaining tools without depending on seeded reports/stories.
-  await call(T.daily, { date: "2026-02-30" }, { error: true, code: "invalid_request" });
+  if (expectedNames.includes(T.daily)) await call(T.daily, { date: "2026-02-30" }, { error: true, code: "invalid_request" });
+  if (expectedNames.includes(T.weekly)) await call(T.weekly, { week: "2026-W99" }, { error: true });
+  if (expectedNames.includes(T.monthly)) await call(T.monthly, { month: "2026-99" }, { error: true });
   await call(T.story, { public_id: "__mcp_check_missing__", report_limit: 3 }, { error: true, code: "not_found" });
 
   // SDK/server schema validation must reject values outside the advertised input contract.

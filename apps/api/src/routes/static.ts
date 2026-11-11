@@ -11,6 +11,7 @@ import { REPO_ROOT, config } from "@aihot/backend/config";
 import { applyPublicHeaders, sendTextWithEtag } from "../http/respond.ts";
 import { sitemapXml } from "@aihot/backend/publication/sitemap";
 import { llmsTxt, loadLlmsAvailability } from "@aihot/backend/publication/llms";
+import { configureReportOpenApi } from "@aihot/backend/publication/report-discovery";
 
 const REF = path.join(REPO_ROOT, "reference");
 const ASSETS = path.join(REPO_ROOT, "assets");
@@ -94,7 +95,7 @@ async function openApiJson(): Promise<string> {
     .replaceAll("{{siteName}}", SITE.name)
     .replaceAll("{{siteUrl}}", config.siteUrl)
     .replaceAll("{{categoryList}}", CATEGORY_KEYS.join(", "));
-  const doc = JSON.parse(raw) as { paths: Record<string, unknown>; components?: { parameters?: Record<string, { schema?: { enum?: string[] } }> } };
+  const doc = configureReportOpenApi(JSON.parse(raw) as { paths: Record<string, unknown>; components?: { parameters?: Record<string, { schema?: { enum?: string[] } }> } });
   // Categories follow the industry pack.
   const walk = (node: unknown) => {
     if (!node || typeof node !== "object") return;

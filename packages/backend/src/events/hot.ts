@@ -3,6 +3,7 @@
 // 24-hour half-life, and the source time (not collection time) places evidence in the window.
 import { sql } from "../db.ts";
 import { tierRank, type HotEntry } from "./hot-read.ts";
+import { publicScopeCondition } from "../content/scope.ts";
 
 export const HOT_RULE_VERSION = "heat-v1-48h-halflife24h";
 const WINDOW_HOURS = 48;
@@ -101,7 +102,7 @@ export async function computeHotRanking(at = new Date()): Promise<{ id: number; 
              coalesce(p.published_at, p.discovered_at) AS at
       FROM facts f JOIN fact_articles fa ON fa.fact_id = f.id JOIN publications p ON p.article_id = fa.article_id
       JOIN sources s ON s.id = p.source_id
-      WHERE f.story_id = ${r.story_id} AND p.visibility = 'public' AND p.eligible AND (NOT p.selected OR p.visible_after <= ${at})
+      WHERE f.story_id = ${r.story_id} AND p.visibility = 'public' AND p.eligible AND ${publicScopeCondition()} AND (NOT p.selected OR p.visible_after <= ${at})
       ORDER BY p.article_id`;
     if (reports.length === 0) continue;
     const rep = [...reports].sort((x, y) => Number(y.first_party) - Number(x.first_party) || Number(y.selected) - Number(x.selected) || (Number(y.score ?? 0) - Number(x.score ?? 0)))[0]!;

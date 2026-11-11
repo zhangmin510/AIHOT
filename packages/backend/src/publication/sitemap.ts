@@ -2,11 +2,14 @@
 // the latest 500 stories, leaderboard pages and indexable items. Cached ~5 minutes and rebuilt in the
 // background after that (crawlers get the previous copy meanwhile); if the database fails, the last
 // successful sitemap is served (never an empty one). Bounded.
-import { FEATURES } from "@aihot/industry/features";
+import { FEATURES, ENABLED_REPORT_KINDS } from "@aihot/industry/features";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { config } from "../config.ts";
 import { sql } from "../db.ts";
+import { publicScopeCondition } from "../content/scope.ts";
+import { CONTENT_SCOPE } from "@aihot/industry/scope";
+import { publicReportCondition } from "./reports.ts";
 import { cached } from "../lib/cache.ts";
 import { escapeXml } from "../lib/text.ts";
 import { siteUrl } from "./links.ts";
@@ -20,7 +23,8 @@ async function leaderboardDetailUrls(): Promise<string[]> {
 
 const MAX_URLS = 45_000;
 const TTL_MS = 5 * 60 * 1000;
-const CACHE_FILE = path.join(config.dataDir, "sitemap-last.xml");
+// A cache from another report configuration must not restore links to a disabled edition type.
+const CACHE_FILE = path.join(config.dataDir, `sitemap-${ENABLED_REPORT_KINDS.join("-") || "no-reports"}-${encodeURIComponent(`${CONTENT_SCOPE.key}:${CONTENT_SCOPE.version}:${CONTENT_SCOPE.requireExplicitPass}`)}.xml`);
 
 let lastGood: string | null = null;
 
@@ -33,18 +37,15 @@ interface Entry {
 
 async function build(): Promise<string> {
   const entries: Entry[] = [];
-  const [latestItem] = await sql<{ t: Date | null }[]>`SELECT max(timeline_at) AS t FROM publications WHERE visibility = 'public' AND selected`;
-  const [latestDaily] = await sql<{ key: string | null; t: Date | null }[]>`SELECT max(key) AS key, max(generated_at) AS t FROM reports WHERE kind = 'daily'`;
+  const [latestItem] = await sql<{ t: Date | null }[]>`SELECT max(p.timeline_at) AS t FROM publications p WHERE p.visibility = 'public' AND p.selected AND ${publicScopeCondition()}`;
   const now = latestItem?.t ?? new Date();
   entries.push(
     { loc: "/", lastmod: now, changefreq: "hourly", priority: 1 },
     { loc: "/all", lastmod: now, changefreq: "hourly", priority: 0.9 },
-    { loc: "/daily", lastmod: latestDaily?.t, changefreq: "daily", priority: 0.9 },
     { loc: "/hot", lastmod: now, changefreq: "hourly", priority: 0.9 },
-    { loc: "/daily/archive", lastmod: latestDaily?.t, changefreq: "daily", priority: 0.7 },
-    { loc: "/weekly", changefreq: "weekly", priority: 0.7 },
-    { loc: "/monthly", changefreq: "monthly", priority: 0.6 },
     { loc: "/topics", changefreq: "daily", priority: 0.7 },
+    { loc: "/papers", lastmod: now, changefreq: "daily", priority: 0.7 },
+    { loc: "/radar", lastmod: now, changefreq: "hourly", priority: 0.7 },
     { loc: "/agent", lastmod: now, changefreq: "weekly", priority: 0.7 },
     { loc: "/about", changefreq: "monthly", priority: 0.5 },
     { loc: "/methodology", changefreq: "monthly", priority: 0.5 },
@@ -52,6 +53,10 @@ async function build(): Promise<string> {
     { loc: "/privacy", changefreq: "monthly", priority: 0.4 },
     { loc: "/changelog", lastmod: now, changefreq: "weekly", priority: 0.5 },
   );
+  for (const kind of ENABLED_REPORT_KINDS) {
+    entries.push({ loc: `/${kind}`, changefreq: kind, priority: 0.7 });
+    if (kind === "daily") entries.push({ loc: "/daily/archive", changefreq: "daily", priority: 0.7 });
+  }
   if (FEATURES.leaderboard) {
     entries.push(
       { loc: "/leaderboard", changefreq: "daily", priority: 0.8 },
@@ -61,7 +66,7 @@ async function build(): Promise<string> {
     for (const board of ["coding", "reasoning", "knowledge", "professional"]) entries.push({ loc: `/leaderboard/category/${board}`, changefreq: "daily", priority: 0.6 });
   }
   if (FEATURES.codexResetMonitor) entries.push({ loc: "/codex-reset", changefreq: "hourly", priority: 0.6 });
-  const reports = await sql<{ kind: string; key: string; generated_at: Date }[]>`SELECT kind, key, generated_at FROM reports ORDER BY kind, key DESC`;
+  const reports = await sql<{ kind: string; key: string; generated_at: Date }[]>`SELECT kind, key, generated_at FROM reports WHERE kind = ANY(${ENABLED_REPORT_KINDS}::text[]) AND ${publicReportCondition()} ORDER BY kind, key DESC`;
   for (const r of reports) entries.push({ loc: `/${r.kind}/${r.key}`, lastmod: r.generated_at, changefreq: r.kind === "daily" ? "never" : "monthly", priority: r.kind === "daily" ? 0.6 : 0.6 });
   for (const t of await topicPageCounts()) {
     if (!t.indexable) continue;
@@ -73,13 +78,13 @@ async function build(): Promise<string> {
   const stories = await sql<{ public_id: string; latest_at: Date | null }[]>`
     SELECT public_id::text, latest_at FROM stories WHERE merged_into IS NULL AND EXISTS (
       SELECT 1 FROM facts f JOIN fact_articles fa ON fa.fact_id = f.id JOIN publications p ON p.article_id = fa.article_id
-      WHERE f.story_id = stories.id AND fa.role IN ('primary', 'report') AND p.visibility = 'public' AND p.eligible)
+      WHERE f.story_id = stories.id AND fa.role IN ('primary', 'report') AND p.visibility = 'public' AND p.eligible AND ${publicScopeCondition()})
     ORDER BY latest_at DESC NULLS LAST LIMIT 500`;
   for (const s of stories) entries.push({ loc: `/story/${s.public_id}`, lastmod: s.latest_at, changefreq: "daily", priority: 0.5 });
   // Model pages exist only for models on a public top-30 board; source pages for every registered source.
   if (FEATURES.leaderboard) for (const loc of await leaderboardDetailUrls()) entries.push({ loc, changefreq: "weekly", priority: 0.4 });
   const items = await sql<{ id: string; t: Date }[]>`
-    SELECT article_id AS id, updated_at AS t FROM publications WHERE visibility = 'public' AND indexable ORDER BY timeline_at DESC LIMIT ${MAX_URLS - entries.length}`;
+    SELECT p.article_id AS id, p.updated_at AS t FROM publications p WHERE p.visibility = 'public' AND p.indexable AND ${publicScopeCondition()} ORDER BY p.timeline_at DESC LIMIT ${MAX_URLS - entries.length}`;
   for (const it of items) entries.push({ loc: `/items/${it.id}`, lastmod: it.t, changefreq: "monthly", priority: 0.5 });
 
   const body = entries
@@ -98,7 +103,8 @@ async function build(): Promise<string> {
 const sitemap = cached(refreshSitemap, { freshMs: TTL_MS, maxStaleMs: 60 * 60_000 });
 
 export function sitemapXml(): Promise<string> {
-  return sitemap.get();
+  // A scope withdrawal must not revive a stale in-memory or on-disk sitemap after a read failure.
+  return CONTENT_SCOPE.requireExplicitPass ? build() : sitemap.get();
 }
 
 async function refreshSitemap(): Promise<string> {

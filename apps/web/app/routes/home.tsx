@@ -68,7 +68,7 @@ export default function Home() {
       {data.hot && <HotTopics entries={data.hot} />}
 
       <section className="card mt-4 p-5" aria-label="评测前沿阅读指南">
-        <div className="mono text-[11px] font-semibold tracking-widest text-accent">发布 · 评测 · 复现</div>
+        <div className="mono text-[11px] font-semibold tracking-widest text-accent">基准 · 评测 · 复现</div>
         <p className="mt-2 text-[16px] font-semibold leading-relaxed text-ink">{EVALUATION.lead}</p>
         <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-[13px] text-accent">
           <Link to="/leaderboard">外部模型榜 →</Link>

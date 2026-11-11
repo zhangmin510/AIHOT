@@ -5,6 +5,8 @@ import type { FeedItemSummary, ItemSummary, MediaView, SourceKind, XPostView } f
 import { sql, type Db } from "../db.ts";
 import { proxiedImage, proxiedImageSet } from "../media/imgproxy.ts";
 import { displayTags } from "./rules.ts";
+import { publicScopeCondition } from "../content/scope.ts";
+import { CONTENT_SCOPE } from "@aihot/industry/scope";
 
 export interface ItemRow {
   id: string;
@@ -78,12 +80,12 @@ export const ITEM_FROM = sql`
 
 /** Listed items: public, and a selected item only after its release gate. */
 export function listedCondition(now: Date) {
-  return sql`p.visibility = 'public' AND (NOT p.selected OR p.visible_after <= ${now})`;
+  return sql`p.visibility = 'public' AND ${publicScopeCondition()} AND (NOT p.selected OR p.visible_after <= ${now})`;
 }
 
 /** Selected set as shown on the home timeline, v1 selected mode and RSS. */
 export function selectedCondition(now: Date) {
-  return sql`p.visibility = 'public' AND p.selected AND p.visible_after <= ${now}`;
+  return sql`p.visibility = 'public' AND ${publicScopeCondition()} AND p.selected AND p.visible_after <= ${now}`;
 }
 
 export function channelCondition(channel: ChannelKey | null | undefined) {
@@ -174,7 +176,7 @@ export function toItemSummary(row: ItemRow): ItemSummary {
     score: row.score === null ? null : Math.round(Number(row.score)),
     selected: row.selected,
     channel: row.channel,
-    story: row.story_public_id ? { publicId: row.story_public_id, title: row.story_title ?? "" } : null,
+    story: row.story_public_id ? { publicId: row.story_public_id, title: CONTENT_SCOPE.requireExplicitPass ? row.title : row.story_title ?? "" } : null,
     x,
   };
 }
@@ -196,6 +198,6 @@ export function toFeedItemSummary(row: ItemRow): FeedItemSummary {
 
 export async function fetchItemsByIds(ids: string[], db: Db = sql): Promise<Map<string, ItemRow>> {
   if (ids.length === 0) return new Map();
-  const rows = await db<ItemRow[]>`SELECT ${ITEM_COLUMNS} ${ITEM_FROM} WHERE p.article_id IN ${db(ids)}`;
+  const rows = await db<ItemRow[]>`SELECT ${ITEM_COLUMNS} ${ITEM_FROM} WHERE p.article_id IN ${db(ids)} AND ${publicScopeCondition()}`;
   return new Map(rows.map((r) => [r.id, r]));
 }

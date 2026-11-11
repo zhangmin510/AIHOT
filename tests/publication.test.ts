@@ -25,7 +25,7 @@ import { buildApp } from "../apps/api/src/app.ts";
 const T = tag();
 const SOURCE = `test-publication-${T}`;
 const BODY = `FULLTEXT-${T} `.repeat(40);
-const REPORT_KEY = `2099-12-${String(10 + Math.floor(Math.random() * 19))}`;
+const REPORT_KEY = "2099-12";
 const app = await buildApp();
 
 before(async () => {
@@ -35,7 +35,7 @@ before(async () => {
             VALUES (${SOURCE}, 'Test publication', 'rss', 'T1', 'editorial', true, true, '2100-01-01')`;
 });
 after(async () => {
-  await sql`DELETE FROM reports WHERE kind = 'daily' AND key = ${REPORT_KEY}`;
+  await sql`DELETE FROM reports WHERE kind = 'monthly' AND key = ${REPORT_KEY}`;
   await app.close();
   await stopBoss();
   await closeDb();
@@ -122,21 +122,21 @@ test("a withdrawn item leaves every report exit", async () => {
   const id = await article();
   await publishArticle(id, released());
   const content = {
-    sections: [{ label: "模型", items: [{ itemId: id, title: `LEAD-${T}`, summary: `QUOTED-${T}`, sourceUrl: `https://example.com/original-${T}`, sourceName: "Test" }] }],
+    themes: [{ heading: "模型", storyRefs: [{ itemId: id, title: `LEAD-${T}`, summary: `QUOTED-${T}`, sourceUrl: `https://example.com/original-${T}`, sourceName: "Test" }] }],
     flashes: [],
   };
   await sql`INSERT INTO reports (kind, key, window_start, window_end, content, generated_at, origin)
-            VALUES ('daily', ${REPORT_KEY}, now() - interval '1 day', now(), ${sql.json(content as never)}, now(), 'manual')
+            VALUES ('monthly', ${REPORT_KEY}, now() - interval '1 month', now(), ${sql.json(content as never)}, now(), 'manual')
             ON CONFLICT (kind, key) DO UPDATE SET content = EXCLUDED.content`;
-  assert.ok((await get(`/api/v1/dailies/${REPORT_KEY}`)).body.includes(`QUOTED-${T}`), "the report quotes the item before");
+  assert.ok((await get(`/api/v1/reports/monthly/${REPORT_KEY}`)).body.includes(`QUOTED-${T}`), "the report quotes the item before");
 
   await setVisibility(id, { visibility: "withdrawn", reason: "test", version: 0 }, "test");
-  for (const url of [`/api/v1/dailies/${REPORT_KEY}`, `/api/site/reports/daily/${REPORT_KEY}`]) {
+  for (const url of [`/api/v1/reports/monthly/${REPORT_KEY}`, `/api/site/reports/monthly/${REPORT_KEY}`]) {
     const res = await get(url);
     assert.equal(res.status, 200, url);
     assert.ok(!res.body.includes(`QUOTED-${T}`) && !res.body.includes(`original-${T}`), `${url} still quotes the withdrawn item`);
   }
-  for (const url of ["/api/v1/dailies"]) {
+  for (const url of ["/api/v1/reports/monthly"]) {
     const res = await get(url);
     assert.ok(res.body.includes(REPORT_KEY), `${url} lists the report`);
     assert.ok(!res.body.includes(`LEAD-${T}`), `${url} headlines the withdrawn title`);

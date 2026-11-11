@@ -8,7 +8,7 @@ import { loadReport, type ReportKind } from "@aihot/backend/publication/reports"
 import { loadTopic } from "@aihot/backend/publication/topics";
 import { loadStoryDetail, resolveStory } from "@aihot/backend/publication/stories";
 import { SITE, withSubject } from "@aihot/industry/site";
-import { FEATURES } from "@aihot/industry/features";
+import { FEATURES, isReportKindEnabled } from "@aihot/industry/features";
 import { config } from "@aihot/backend/config";
 import { ogEtag, renderOg, type OgCard } from "../og/render.ts";
 import { posterEtag, renderPoster, type Poster } from "../og/poster.ts";
@@ -58,6 +58,7 @@ export function registerOg(app: FastifyInstance) {
   app.get("/og/pages/:file", async (req, reply) => {
     const name = (req.params as { file: string }).file.replace(/\.png$/, "");
     const card = PAGES[name];
+    if (["daily", "weekly", "monthly"].includes(name) && !isReportKindEnabled(name)) return notFound(reply);
     if ((name === "leaderboard" && !FEATURES.leaderboard) || (name === "codex-reset" && !FEATURES.codexResetMonitor)) return notFound(reply);
     if (!card || !(req.params as { file: string }).file.endsWith(".png")) return notFound(reply);
     return send(req, reply, card, 86400);
@@ -101,7 +102,7 @@ export function registerOg(app: FastifyInstance) {
 
   app.get("/og/reports/:kind/:file", async (req, reply) => {
     const { kind, file } = req.params as { kind: string; file: string };
-    if (!["daily", "weekly", "monthly"].includes(kind) || !file.endsWith(".png")) return notFound(reply);
+    if (!isReportKindEnabled(kind) || !file.endsWith(".png")) return notFound(reply);
     const r = await loadReport(kind as ReportKind, file.slice(0, -4));
     if (!r) return notFound(reply);
     return send(req, reply, {

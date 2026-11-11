@@ -23,7 +23,10 @@ function BoardFrame({ children }: { children: React.ReactNode }) {
           <div className="mono text-[11px] font-semibold tracking-[0.16em] text-accent">{SITE.name.toUpperCase()} LEADERBOARD</div>
           <h1 className="mt-1.5 text-[24px] font-semibold leading-[1.3] text-ink">AI 模型排行榜</h1>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <Link to="/leaderboard/history" className={chip}>
+            模型评测记录 <IconArrowUpRight size={13} />
+          </Link>
           <Link to="/leaderboard/sources" className={chip}>
             评测来源 <IconArrowUpRight size={13} />
           </Link>
@@ -44,5 +47,5 @@ function BoardFrame({ children }: { children: React.ReactNode }) {
 export function ErrorBoundary() {
   const error = useRouteError();
   const status = isRouteErrorResponse(error) ? error.status : 500;
-  return <BoardFrame><EmptyState title={status === 404 ? "没有这个榜单" : "暂无可用榜单"} action={<Link to="/methodology" className="mt-4 text-[13px] text-accent">阅读评测方法 →</Link>}>{status === 404 ? "请选择上方的有效栏目。" : "首次计算尚未完成，或评测证据暂不可用。有效结果发布前不展示示例名次或成绩。"}</EmptyState></BoardFrame>;
+  return <BoardFrame><EmptyState title={status === 404 ? "没有这个榜单" : "暂无可用榜单"} action={<Link to="/leaderboard/history" className="mt-4 text-[13px] text-accent">查看模型评测记录 →</Link>}>{status === 404 ? "请选择上方的有效栏目。" : "综合结果尚未满足当前公开许可或证据要求。可以先查看允许公开的来源记录，不展示示例名次或成绩。"}</EmptyState></BoardFrame>;
 }

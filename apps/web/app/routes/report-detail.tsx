@@ -1,5 +1,5 @@
 import { SITE, withSubject } from "@aihot/industry/site";
-import { data, useLoaderData } from "react-router";
+import { data, redirect, useLoaderData } from "react-router";
 import type { Route } from "./+types/report-detail";
 import type { ReportDetail, ReportNavigationEntry, ReportKind } from "@aihot/contracts/site";
 import { apiGet, loadOr404 } from "../lib/api.server";
@@ -7,7 +7,7 @@ import { pageMeta, titled } from "../lib/seo";
 import { beijingDate } from "../lib/format";
 import { ReportLayout } from "../features/report/ReportLayout";
 import { ReportPaper } from "../features/report/ReportPaper";
-import { KIND_LABEL, kindFromPath } from "../features/report/format";
+import { KIND_LABEL, disabledReportRedirect, kindFromPath } from "../features/report/format";
 
 const PATTERN: Record<ReportKind, RegExp> = {
   daily: /^\d{4}-\d{2}-\d{2}$/,
@@ -16,7 +16,10 @@ const PATTERN: Record<ReportKind, RegExp> = {
 };
 
 export async function loader({ request, params }: Route.LoaderArgs) {
-  const kind = kindFromPath(new URL(request.url).pathname);
+  const pathname = new URL(request.url).pathname;
+  const moved = disabledReportRedirect(pathname);
+  if (moved) throw redirect(moved, 308);
+  const kind = kindFromPath(pathname);
   const key = params.key ?? "";
   if (!PATTERN[kind].test(key)) throw data({ message: "not_found" }, { status: 404 });
   const [report, { items: index }] = await Promise.all([

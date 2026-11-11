@@ -101,7 +101,7 @@ after(async () => {
 test("default evaluation follows the production score route and shares duplicate score inputs without changing tier decisions", async (t) => {
   await withoutModelOverrides(async () => {
     const prefilter = await stub(() => ({
-      choices: [{ message: { content: JSON.stringify({ label: "PASS", reason: "relevant" }) } }],
+      choices: [{ message: { content: JSON.stringify({ label: "PASS", reason: "relevant", scopeEvidence: "released a model with benchmark, pricing and availability details." }) } }],
       usage: { prompt_tokens: 10, completion_tokens: 5 },
     }));
     const score = await stub(async () => {
@@ -130,7 +130,7 @@ test("default evaluation follows the production score route and shares duplicate
 test("a shared unusable score fails every matching case once, then retry usage includes every provider attempt", async (t) => {
   await withoutModelOverrides(async () => {
     const prefilter = await stub(() => ({
-      choices: [{ message: { content: JSON.stringify({ label: "PASS", reason: "relevant" }) } }],
+      choices: [{ message: { content: JSON.stringify({ label: "PASS", reason: "relevant", scopeEvidence: "released a model with benchmark, pricing and availability details." }) } }],
       usage: { prompt_tokens: 10, completion_tokens: 5 },
     }));
     const score = await stub((hit) => ({

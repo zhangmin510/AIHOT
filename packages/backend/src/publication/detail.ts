@@ -5,9 +5,13 @@ import { sql } from "../db.ts";
 import { proxyBodyImages } from "../media/imgproxy.ts";
 import { textToHtml } from "../content/sanitize.ts";
 import { ITEM_COLUMNS, ITEM_FROM, selectedCondition, toItemSummary, xView, type ItemRow } from "./items.ts";
+import { publicScopeCondition } from "../content/scope.ts";
+import { CONTENT_SCOPE } from "@aihot/industry/scope";
 import { itemUrl } from "./links.ts";
 import { hasItemPage } from "./rules.ts";
 import { SITE } from "@aihot/industry/site";
+import { loadItemEvidence } from "./evidence.ts";
+import { loadPaperRefByArticle } from "./papers.ts";
 
 interface DetailRow extends ItemRow {
   body_html: string | null;
@@ -39,7 +43,7 @@ async function loadRow(id: string): Promise<DetailRow | null> {
   const [row] = await sql<DetailRow[]>`
     SELECT ${ITEM_COLUMNS}, a.body_html, a.body_text, a.body_status, tr.body_html AS tr_html, tr.complete AS tr_complete
     ${ITEM_FROM}
-    WHERE p.article_id = ${id}`;
+    WHERE p.article_id = ${id} AND ${publicScopeCondition()}`;
   return row ?? null;
 }
 
@@ -76,6 +80,7 @@ export async function loadItemDetail(id: string, now = new Date()): Promise<Deta
     SELECT DISTINCT st.public_id::text AS "publicId", st.title
     FROM fact_articles fa JOIN facts f ON f.id = fa.fact_id JOIN stories st ON st.id = f.story_id
     WHERE fa.article_id = ${id} AND fa.role <> 'mention' AND st.merged_into IS NULL
+      AND EXISTS (SELECT 1 FROM publications p WHERE p.story_id=st.id AND p.visibility='public' AND p.eligible AND ${publicScopeCondition()})
     LIMIT 6`;
 
   let body: ItemDetail["body"] = null;
@@ -107,7 +112,7 @@ export async function loadItemDetail(id: string, now = new Date()): Promise<Deta
     const [g] = await sql<{ public_id: string; reports: number; sources: number }[]>`
       SELECT f.public_id, count(p.article_id) AS reports, count(DISTINCT p.source_id) AS sources
       FROM facts f JOIN publications p ON p.fact_id = f.id
-      WHERE f.id = ${row.fact_id} AND p.visibility = 'public' AND p.eligible AND (NOT p.selected OR p.visible_after <= ${now})
+      WHERE f.id = ${row.fact_id} AND p.visibility = 'public' AND p.eligible AND ${publicScopeCondition()} AND (NOT p.selected OR p.visible_after <= ${now})
       GROUP BY f.public_id`;
     const [dev] = await sql<{ n: number }[]>`
       SELECT count(DISTINCT other.id) AS n FROM facts f
@@ -127,16 +132,19 @@ export async function loadItemDetail(id: string, now = new Date()): Promise<Deta
 
   const detail: ItemDetail = {
     ...summary,
+    evidence: await loadItemEvidence(id),
+    paper: await loadPaperRefByArticle(id, sql, now),
     readingMode: "full",
     author: row.author,
     language: row.language,
     body,
     outline,
-    relatedStories: related,
+    relatedStories: CONTENT_SCOPE.requireExplicitPass ? [] : related,
     indexable: row.indexable,
     markdownAvailable: markdownAvailable(row),
     group,
   };
+  detail.evaluationType = detail.evidence?.evaluationType ?? null;
   return { kind: "found", detail, row };
 }
 
@@ -165,6 +173,13 @@ export async function exportMarkdown(id: string): Promise<{ filename: string; bo
   lines.push(`- 原文：${row.url}`, "");
   if (row.summary) lines.push("## 摘要", "", row.summary, "");
   if (row.selected && row.reason) lines.push("## 推荐理由", "", row.reason, "");
+  const evidence = await loadItemEvidence(id);
+  if (evidence) {
+    lines.push("## 评测证据", "", `- 机器匹配状态：${evidence.status}（不代表本站复现）`);
+    for (const claim of evidence.claims) lines.push(`- ${claim.statement}`, `  原文定位：${claim.support.start}–${claim.support.end}；${claim.support.url}`);
+    if (evidence.missingFields.length) lines.push(`- 未提供/待确认：${evidence.missingFields.join("、")}`);
+    lines.push("");
+  }
   if (row.channel === "x" && row.x_post?.text) {
     lines.push("## 正文", "", String(row.x_post.text), "");
     if (row.zh_text) lines.push("## 中文译文", "", row.zh_text, "");

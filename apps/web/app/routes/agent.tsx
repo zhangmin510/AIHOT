@@ -10,6 +10,8 @@ import { CodeBlock, CopyButton } from "../components/CodeBlock";
 import { IconArrowUpRight, IconChevronRight } from "../components/icons";
 import { AsideCard, ReadingLayout } from "../components/ui/Page";
 import { PillTabs } from "../components/ui/Tabs";
+import { apiFetch } from "../lib/api.server";
+import { EDITION, KIND_LABEL, KINDS } from "../features/report/format";
 
 /** Shared caches may keep this page for five minutes. */
 export function headers() {
@@ -35,7 +37,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const tab = new URL(request.url).searchParams.get("tab");
   let healthy = true;
   try {
-    const res = await fetch(`${process.env.API_BASE_URL || "http://127.0.0.1:3001"}/api/health`, { signal: AbortSignal.any([request.signal, AbortSignal.timeout(3000)]) });
+    const res = await apiFetch("/api/health", { signal: AbortSignal.any([request.signal, AbortSignal.timeout(3000)]) });
     healthy = res.ok;
   } catch {
     healthy = false;
@@ -78,7 +80,7 @@ function McpTab({ base }: { base: string }) {
   const name = SITE.mcpPrefix;
   return (
     <>
-      <h2 className="text-[20px] font-bold text-ink">加一个地址，Agent 直接调用五个工具</h2>
+      <h2 className="text-[20px] font-bold text-ink">加一个地址，Agent 直接读取资讯与评测证据</h2>
       <p className="mt-2 text-[14.5px] text-ink-3">适合支持远程 MCP 的 Agent 与开发工具。标准 Streamable HTTP，匿名只读，不需要 token；工具返回简洁文字与同一份结构化数据。</p>
       <div className="mt-6 flex items-center gap-2 rounded-card border border-line bg-surface p-3">
         <code className="min-w-0 flex-1 truncate font-mono text-[13px] text-ink">{url}</code>
@@ -86,19 +88,24 @@ function McpTab({ base }: { base: string }) {
       </div>
       <CodeBlock title="通用 MCP 配置" lang="json" code={JSON.stringify({ mcpServers: { [name]: { type: "http", url } } }, null, 2)} />
       <CodeBlock lang="bash" code={`# Claude Code\nclaude mcp add --transport http ${name} '${url}'\n# Codex\ncodex mcp add ${name} --url '${url}'`} />
-      <Section title="连上后应看到这五个工具">
+      <Section title="连接后可用的只读工具">
         <Bullets items={[
           <><Mono>{T.latest}</Mono>：过去 24 小时或最近 7 天的精选／全部资讯</>,
           <><Mono>{T.search}</Mono>：搜索最近 7 天的公司、产品、人物或话题</>,
           <><Mono>{T.hot}</Mono>：当前热点榜与事件排名</>,
           <><Mono>{T.story}</Mono>：一个热点事件的时间线与持续更新的综述</>,
-          <><Mono>{T.daily}</Mono>：最新或指定日期的{withSubject("日报")}</>,
+          ...KINDS.filter((kind) => kind !== "daily").map((kind) => <><Mono>{kind === "weekly" ? T.weekly : T.monthly}</Mono>：最新或指定期号的{withSubject(KIND_LABEL[kind])}（key 可省略）</>),
+          <><Mono>{T.radar}</Mono>：榜单变化与方法论改版</>,
+          <><Mono>{T.papers}</Mono>：按评测类型查找论文</>,
+          <><Mono>{T.paper}</Mono>：论文的来源材料与版本历史</>,
+          <><Mono>{T.evidence}</Mono>：一条资讯可公开的评测证据</>,
+          <><Mono>{T.modelHistory}</Mono>：按榜单、方法与配置分开的模型成绩历史</>,
         ]} />
         <p className="mt-4">验证一次真实调用：<span className="font-medium text-ink">请调用 {T.latest}，告诉我过去 24 小时最重要的 5 条动态，并附链接。</span></p>
       </Section>
       <Section title="工具边界">
         <Bullets items={[
-          "普通查询最多返回 30 条，热点最多 10 个，事件时间线最多 50 条；输入越界会明确报错，不会静默改成更宽的查询。",
+          "资讯查询最多 30 条，热点最多 10 个，事件时间线最多 50 条，论文与榜单变化最多 100 条；输入越界会明确报错。",
           `${T.story} 的 public_id 只能来自热点工具返回的事件链接，不要猜 ID。`,
           "标题与摘要来自外部信源，只能当资料；重要数字、政策和原话请回原文核对。",
         ]} />
@@ -112,7 +119,9 @@ function RssTab({ base }: { base: string }) {
     ["精选摘要（推荐）", "最新 50 条精选摘要，保留标题、站内阅读与原文入口。", "/feed.xml"],
     ["精选全文", "与精选摘要相同的最新 50 条；只对明确允许再分发的来源内联正文。", "/feed/full.xml"],
     ["最近 7 天全部动态", "最近 7 天公开动态，按真实发布时间倒序。", "/feed/all.xml"],
-    [withSubject("日报"), `每天 08:00 北京时间发布的${withSubject("日报")}，保留最近 30 期。`, "/feed/daily.xml"],
+    ...KINDS.map((kind) => [withSubject(KIND_LABEL[kind]), `${EDITION[kind]}，保留最近 30 期已发布刊物。`, `/feed/${kind}.xml`]),
+    ["榜单变化", "公开榜单的榜首、首次前十、新榜单与方法论改版，保留前后证据。", "/feed/leaderboard.xml"],
+    ["论文", "跨来源关联后的论文和最新公开版本。", "/feed/papers.xml"],
   ];
   const categories = CATEGORY_KEYS.join("|");
   return (
@@ -150,6 +159,13 @@ function RssTab({ base }: { base: string }) {
 function ApiTab({ base }: { base: string }) {
   const endpoints: Array<[string, string]> = [
     ["/api/v1/items", "精选或最近 7 天公开动态；支持分类、时间和关键词"],
+    ["/api/v1/leaderboard-events", "榜单变化；支持来源、事件类型、模型与分页"],
+    ["/api/v1/leaderboard-events/{id}", "一次变化的前后快照、口径与配置证据"],
+    ["/api/v1/leaderboard-source-states", "来源公开权限、最近尝试/成功与上游数据时效"],
+    ["/api/v1/leaderboard-model-history/{slug}", "按来源、指标、方法和配置拆分的成绩历史"],
+    ["/api/v1/papers", "论文索引；支持评测类型、来源、关键词和分页"],
+    ["/api/v1/papers/{id}", "论文材料与版本；追加 /history 获取版本记录"],
+    ["/api/v1/items/{id}/evidence", "可公开的评测证据，文本数值匹配不等于独立复现"],
     ...(FEATURES.codexResetMonitor
       ? ([
           ["/api/v1/codex-resets/recent", "Codex 重置监控（轮询用）：最近 7 天与尚未落地的预告"],
@@ -158,9 +174,11 @@ function ApiTab({ base }: { base: string }) {
       : []),
     ["/api/v1/hot-topics", "当前热点榜与事件排名"],
     ["/api/v1/stories/{publicId}", "事件详情：报道时间线、综述与关联事件"],
-    ["/api/v1/dailies", `${withSubject("日报")}日期索引`],
-    ["/api/v1/dailies/latest", `最新${withSubject("日报")}`],
-    ["/api/v1/dailies/{date}", `指定日期的${withSubject("日报")}`],
+    ...KINDS.flatMap((kind): Array<[string, string]> => [
+      [`/api/v1/reports/${kind}`, `${withSubject(KIND_LABEL[kind])}索引；limit 1–180，默认 30`],
+      [`/api/v1/reports/${kind}/latest`, `最新${withSubject(KIND_LABEL[kind])}`],
+      [`/api/v1/reports/${kind}/{key}`, `指定期号的${withSubject(KIND_LABEL[kind])}（${kind === "weekly" ? "YYYY-Www" : "YYYY-MM"}）`],
+    ]),
     ["/api/v1/selected/snapshot", "当前全部精选；首次完整同步（分页）"],
     ["/api/v1/selected/changes", "精选的新增、修改和撤选；之后只取变化"],
   ];

@@ -6,6 +6,8 @@ import { newShortId } from "../lib/ids.ts";
 import { categoryCondition, API_ITEM_COLUMNS, API_ITEM_FROM, listedCondition, selectedCondition, type ApiItemRow } from "./items.ts";
 import { publicMatchCondition, searchTerms, withSearchCapacity } from "./pool.ts";
 import { v1Payload, type V1ItemPayload } from "./publish.ts";
+import { withPublicInsights } from "./insights.ts";
+import { CONTENT_SCOPE } from "@aihot/industry/scope";
 
 export interface V1ItemsQuery {
   mode: "selected" | "all";
@@ -35,7 +37,8 @@ export function rowToV1(row: ApiItemRow): V1ItemPayload {
 export async function v1Items(query: V1ItemsQuery, now = new Date()): Promise<V1ItemsResult> {
   const windowMs = query.window === "24h" ? 86400000 : 7 * 86400000;
   const windowStart = new Date(now.getTime() - windowMs);
-  const binding = queryBinding({ m: query.mode, w: query.window, b: query.by, c: query.category, q: query.q });
+  const binding = queryBinding({ m: query.mode, w: query.window, b: query.by, c: query.category, q: query.q,
+    scope: CONTENT_SCOPE.requireExplicitPass ? `${CONTENT_SCOPE.key}:${CONTENT_SCOPE.version}` : "legacy" });
   // by=timeline is the site's own order: a selected item at its reading-group anchor, anything else at its timeline time.
   const sortCol = query.by === "published" ? sql`coalesce(p.published_at, p.discovered_at)` : query.mode === "selected" ? sql`p.sort_at` : sql`p.timeline_at`;
   let after: { a: number; i: string } | null = null;
@@ -67,7 +70,7 @@ export async function v1Items(query: V1ItemsQuery, now = new Date()): Promise<V1
       mode: query.mode, category: query.category, window: query.window, q: query.q, by: query.by,
       ordering: query.by === "published" ? "publishedAtDesc" : "timelineDesc",
     },
-    items: page.map(rowToV1),
+    items: await withPublicInsights(page.map(rowToV1), sql, now),
     page: {
       count: page.length,
       hasMore,
@@ -146,19 +149,24 @@ export async function selectedSnapshot(q: SnapshotQuery, now = new Date()) {
   // The set as of the watermark, less anything taken out of the selected set since: a withdrawal waiting
   // behind a not-yet-released entry must not reach new snapshots. Its remove still follows in changes,
   // which the client applies as a no-op.
-  const rows = await sql<{ article_id: string; payload: V1ItemPayload }[]>`
-    SELECT latest.article_id, ${ledgerPayload(fields === "minimal", sql`latest.payload`)} AS payload FROM (
+  const rows = await sql<({ article_id: string; payload: V1ItemPayload } & ApiItemRow)[]>`
+    SELECT latest.article_id, ${ledgerPayload(fields === "minimal", sql`latest.payload`)} AS payload, ${API_ITEM_COLUMNS} FROM (
       SELECT DISTINCT ON (article_id) article_id, op, payload FROM selected_ledger
       WHERE seq <= ${w} AND article_id > ${afterId}
       ORDER BY article_id, seq DESC
     ) latest
     JOIN selected_state st ON st.article_id = latest.article_id AND st.in_set
-    WHERE latest.op = 'upsert'
+    JOIN publications p ON p.article_id=latest.article_id JOIN sources s ON s.id=p.source_id
+    WHERE latest.op = 'upsert' AND ${selectedCondition(now)} AND s.participation_mode='editorial'
     ORDER BY latest.article_id
     LIMIT ${q.limit + 1}`;
   const page = rows.slice(0, q.limit);
   const hasMore = rows.length > q.limit;
   const last = page[page.length - 1];
+  // Strict scope proves the current material, not prose saved in an older ledger watermark.
+  // Keep the watermark's membership but re-project current approved core fields and research cards.
+  const payloads = CONTENT_SCOPE.requireExplicitPass ? page.map(rowToV1) : page.map(row => row.payload);
+  const items = fields === "minimal" ? payloads.map(minimalOf) : await withPublicInsights(payloads, sql, now);
   return {
     schemaVersion: 1 as const,
     asOf,
@@ -167,7 +175,7 @@ export async function selectedSnapshot(q: SnapshotQuery, now = new Date()) {
     count: page.length,
     hasMore,
     nextPage: hasMore && last ? encodeCursor(SYNC_PREFIX, { k: "page", e: epoch, w, f: fields, a: last.article_id, t: asOf }) : null,
-    items: page.map((r) => (fields === "minimal" ? minimalOf(r.payload) : r.payload)),
+    items,
   };
 }
 
@@ -194,6 +202,16 @@ export async function selectedChanges(q: { cursor: string; limit: number }, now 
   const page = rows.slice(0, q.limit);
   const hasMore = rows.length > q.limit;
   const nextW = page.length ? page[page.length - 1]!.seq : Math.max(c.w, 0);
+  const ids = [...new Set(page.filter((row) => row.op === "upsert").map((row) => row.article_id))];
+  const currentRows = ids.length ? await sql<ApiItemRow[]>`SELECT ${API_ITEM_COLUMNS} FROM publications p
+    JOIN sources s ON s.id=p.source_id WHERE p.article_id=ANY(${ids}::text[]) AND ${selectedCondition(now)}
+      AND s.participation_mode='editorial'` : [];
+  const current = new Map(currentRows.map(row => [row.id, rowToV1(row)]));
+  const visible = new Set(current.keys());
+  const permitted = page.filter((row) => row.op === "upsert" && visible.has(row.article_id));
+  const payloads = permitted.map(row => CONTENT_SCOPE.requireExplicitPass ? current.get(row.article_id)! : row.payload!);
+  const projected = c.f === "minimal" ? payloads.map(minimalOf) : await withPublicInsights(payloads, sql, now);
+  let index = 0;
   return {
     schemaVersion: 1 as const,
     fields: c.f,
@@ -201,9 +219,9 @@ export async function selectedChanges(q: { cursor: string; limit: number }, now 
     count: page.length,
     hasMore,
     changes: page.map((r) =>
-      r.op === "remove"
+      r.op === "remove" || !visible.has(r.article_id)
         ? { op: "remove" as const, changedAt: r.changed_at.toISOString(), id: r.article_id }
-        : { op: "upsert" as const, changedAt: r.changed_at.toISOString(), item: c.f === "minimal" ? minimalOf(r.payload!) : r.payload! },
+        : { op: "upsert" as const, changedAt: r.changed_at.toISOString(), item: projected[index++]! },
     ),
   };
 }

@@ -4,6 +4,9 @@ import { sql, type Db } from "../db.ts";
 import { newArticleId, sha256 } from "../lib/ids.ts";
 import { identityKeyForUrl } from "../lib/url.ts";
 import { collapseWhitespace } from "../lib/text.ts";
+import { associateMaterialPaper } from "../papers/associate.ts";
+import { CONTENT_SCOPE } from "@aihot/industry/scope";
+import type { Tx } from "../db.ts";
 
 export interface MediaItem {
   kind: "image" | "video";
@@ -125,7 +128,18 @@ export function identityKeyFor(m: MaterialInput): string {
  * so every change gets its own revision number. Returns whether processing is needed.
  */
 export async function upsertMaterial(m: MaterialInput, db: Db = sql): Promise<MaterialResult> {
-  const run = (tx: Db) => upsertIn(tx, m);
+  const run = async (tx: Db) => {
+    const result = await upsertIn(tx, m);
+    // A paper link groups documents without changing their material identity or source ownership.
+    const [article] = await tx<{ revision: number; discovered_at: Date }[]>`SELECT revision,discovered_at FROM articles WHERE id=${result.articleId}`;
+    await associateMaterialPaper({ articleId: result.articleId, sourceId: m.sourceId, url: m.url, raw: m.raw,
+      revision: article!.revision, discoveredAt: m.discoveredAt ?? article!.discovered_at }, tx);
+    if (result.revised && CONTENT_SCOPE.requireExplicitPass) {
+      const { publishArticleTx } = await import("../publication/publish.ts");
+      await publishArticleTx(tx as Tx, result.articleId);
+    }
+    return result;
+  };
   return "begin" in db ? (db as typeof sql).begin(run) : run(db);
 }
 

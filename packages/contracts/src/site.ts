@@ -1,6 +1,7 @@
 // First-party site API (/api/site/*). Not a public API: it may evolve with the website,
 // but it is served from the same public read layer as v1, RSS and MCP.
 import type { CategoryKey, ChannelKey } from "./taxonomy.ts";
+import type { EvaluationType, PublicEvaluationEvidence, PaperRef } from "./evaluation.ts";
 
 export type SourceKind = "rss" | "web_list" | "json_list" | "x_search" | "mp_account" | "external";
 
@@ -43,6 +44,9 @@ export interface StoryRef {
 }
 
 export interface ItemSummary {
+  evaluationType?: EvaluationType | null;
+  evidence?: PublicEvaluationEvidence | null;
+  paper?: PaperRef | null;
   id: string;
   revision: number;
   title: string;
@@ -65,6 +69,9 @@ export interface ItemSummary {
 
 /** The fields rendered by a site feed card; full original text lives in the item detail. */
 export interface FeedItemSummary extends Pick<ItemSummary, "id" | "title" | "summary" | "reason" | "publishedAt" | "timelineAt" | "category" | "tags" | "score" | "selected" | "channel"> {
+  evaluationType?: EvaluationType | null;
+  evidence?: PublicEvaluationEvidence | null;
+  paper?: PaperRef | null;
   source: Pick<SourceRef, "name">;
   x: (Pick<XPostView, "authorName" | "handle" | "avatarUrl" | "avatarSrcSet" | "media"> & {
     quoted: Omit<NonNullable<XPostView["quoted"]>, "url"> | null;

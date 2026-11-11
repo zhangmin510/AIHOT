@@ -16,13 +16,14 @@ let deadline: number;
 let refreshAt: string;
 let metaDelayMs = 0;
 let evidenceTags: string[] | null = null;
+let readOnlySnapshot = false;
 const apiCookies: Array<string | undefined> = [];
 const api = createServer((req, res) => {
   const url = new URL(req.url!, "http://api.local");
   apiCookies.push(req.headers.cookie);
   res.setHeader("Content-Type", "application/json");
   if (url.pathname === "/api/site/meta") {
-    const respond = () => res.end(JSON.stringify({ changelogVersion: "2026-09-28T12:00" }));
+    const respond = () => res.end(JSON.stringify({ changelogVersion: "2026-09-28T12:00", ...(readOnlySnapshot ? { preview: { readOnly: true, exportedAt: "2026-11-04T04:00:00Z" } } : {}) }));
     return metaDelayMs ? setTimeout(respond, metaDelayMs) : respond();
   }
   if (url.pathname === "/api/site/timeline") {
@@ -128,6 +129,22 @@ test("preview identifies its state and withholds unconfirmed legal templates", a
     assert.match(body, /预览状态/);
     assert.match(body, /不发布未经确认的法律模板/);
     assert.doesNotMatch(body, /生效日期|不出售个人信息|来源方的更正与下架/);
+  }
+});
+
+test("a read-only snapshot shows its export time and never offers a feedback form", async () => {
+  readOnlySnapshot = true;
+  try {
+    const home = await (await fetch(origin)).text();
+    assert.match(home, /现有公开内容的快照/);
+    assert.match(home, /手动更新/);
+    assert.match(home, /datetime="2026-11-04T04:00:00Z"/i);
+    assert.doesNotMatch(home, /真实内容尚未生成/);
+    const feedback = await (await fetch(`${origin}/feedback`)).text();
+    assert.match(feedback, /只读预览暂不接收反馈/);
+    assert.doesNotMatch(feedback, /<form|<textarea|type="file"|id="fb-email"/);
+  } finally {
+    readOnlySnapshot = false;
   }
 });
 

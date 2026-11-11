@@ -5,6 +5,9 @@
 import type { GroupInfo, TimelineCard, TimelineFilters, TimelineResponse } from "@aihot/contracts/site";
 import { beijingDate } from "@aihot/contracts/time";
 import { sql } from "../db.ts";
+import { publicScopeCondition } from "../content/scope.ts";
+import { CONTENT_SCOPE } from "@aihot/industry/scope";
+import { withPublicInsights } from "./insights.ts";
 import { decodeCursor, encodeCursor, InvalidCursorError, queryBinding } from "../lib/cursor.ts";
 import {
   ITEM_COLUMNS, ITEM_FROM, categoryCondition, channelCondition, selectedCondition, tagCondition, toFeedItemSummary, topicCondition,
@@ -24,11 +27,11 @@ interface GroupRow {
 }
 
 function filterSql(q: TimelineQuery) {
-  return sql`${channelCondition(q.channel)} ${categoryCondition(q.category)} ${tagCondition(q.tag)} ${topicCondition(q.topicTags)}`;
+  return sql`AND ${publicScopeCondition()} ${channelCondition(q.channel)} ${categoryCondition(q.category)} ${tagCondition(q.tag)} ${topicCondition(q.topicTags)}`;
 }
 
 function binding(q: TimelineQuery): string {
-  return queryBinding({ c: q.channel, k: q.category, t: q.tag, p: q.topic ?? null });
+  return queryBinding({ c: q.channel, k: q.category, t: q.tag, p: q.topic ?? null, scope: CONTENT_SCOPE.requireExplicitPass ? `${CONTENT_SCOPE.key}:${CONTENT_SCOPE.version}` : "legacy" });
 }
 
 /** Representative preference: first-party, full text, higher score, earliest. */
@@ -66,12 +69,12 @@ const groupedCache = new Map<string, { at: number; rows: Array<{ gk: string; anc
 const groupedPending = new Map<string, Promise<Array<{ gk: string; anchor: number }>>>();
 async function groupedAnchors(q: TimelineQuery, now: Date): Promise<Array<{ gk: string; anchor: number }>> {
   const key = binding(q);
-  const cached = q.now ? undefined : groupedCache.get(key);
+  const cached = q.now || CONTENT_SCOPE.requireExplicitPass ? undefined : groupedCache.get(key);
   if (cached && Date.now() - cached.at < 5000) return cached.rows;
-  const pending = q.now ? undefined : groupedPending.get(key);
+  const pending = q.now || CONTENT_SCOPE.requireExplicitPass ? undefined : groupedPending.get(key);
   if (pending) return pending;
   const load = queryGroupedAnchors(q, now);
-  if (q.now) return load;
+  if (q.now || CONTENT_SCOPE.requireExplicitPass) return load;
   groupedPending.set(key, load);
   try {
     const rows = await load;
@@ -167,7 +170,7 @@ export async function loadTimeline(q: TimelineQuery): Promise<Omit<TimelineRespo
       // Reports of the facts that have a selected report (the developments), counted once each.
       reportCount: new Set(reports.filter((r) => byFact.has(r.fact_id)).map((r) => r.article_id)).size,
       developmentCount: byFact.size,
-      latestDevelopment: newest ? { factId: newest.public_id, title: newest.title, at: new Date(firstSeen(newestRows)).toISOString() } : null,
+      latestDevelopment: newest && !CONTENT_SCOPE.requireExplicitPass ? { factId: newest.public_id, title: newest.title, at: new Date(firstSeen(newestRows)).toISOString() } : null,
     };
     const showGroup = group.reportCount > 1 || group.developmentCount > 1;
     planned.push({ key: g.gk, anchorAt: g.anchor_at.toISOString(), id: rep.id, group: showGroup ? group : null });
@@ -180,9 +183,13 @@ export async function loadTimeline(q: TimelineQuery): Promise<Omit<TimelineRespo
   const cards: TimelineCard[] = planned.flatMap(({ id, key, anchorAt, group }) => {
     const row = rows.get(id);
     if (!row) return [];
-    if (group) group.story = row.story_public_id ? { publicId: row.story_public_id, title: row.story_title ?? "" } : null;
+    if (group) {
+      group.story = row.story_public_id ? { publicId: row.story_public_id, title: CONTENT_SCOPE.requireExplicitPass ? row.title : row.story_title ?? "" } : null;
+    }
     return [{ key, anchorAt, item: toFeedItemSummary(row), group }];
   });
+  const enriched = await withPublicInsights(cards.map(card => card.item), sql, now);
+  for (let i = 0; i < cards.length; i++) cards[i]!.item = enriched[i]!;
 
   // Day header counts for the days on this page, over the full grouped set.
   const days = new Set(page.map((g) => beijingDate(g.anchor_at)));

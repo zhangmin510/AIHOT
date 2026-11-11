@@ -1,7 +1,10 @@
 // Public pool (/all) with numeric pages, and search in its two orderings.
-import type { PoolResponse, TimelineFilters } from "@aihot/contracts/site";
+import type { FeedItemSummary, PoolResponse, TimelineFilters } from "@aihot/contracts/site";
 import { beijingDate, beijingMidnight } from "@aihot/contracts/time";
 import { one, sql, withCustomPlans, type Db } from "../db.ts";
+import { withPublicInsights } from "./insights.ts";
+import { publicScopeCondition } from "../content/scope.ts";
+import { CONTENT_SCOPE } from "@aihot/industry/scope";
 import {
   categoryCondition, channelCondition, ITEM_COLUMNS, ITEM_FROM, listedCondition, tagCondition, toFeedItemSummary, topicCondition,
   type ItemRow,
@@ -110,6 +113,24 @@ export interface PoolQuery extends TimelineFilters {
   now?: Date;
 }
 
+export interface PoolExportCursor { at: string; id: string }
+export interface PoolExportPage { items: FeedItemSummary[]; next: PoolExportCursor | null }
+
+/** Complete public pool for offline exports. The HTTP reader keeps its 50-page browsing cap. */
+export async function loadPoolExportPage(query: Omit<PoolQuery, "page" | "q" | "tab">, after: PoolExportCursor | null = null): Promise<PoolExportPage> {
+  const now = query.now ?? new Date();
+  const rows = await sql<(ItemRow & { export_at: string })[]>`
+    SELECT ${ITEM_COLUMNS}, p.timeline_at::text AS export_at ${ITEM_FROM}
+    WHERE ${listedCondition(now)} AND p.eligible
+      ${channelCondition(query.channel)} ${categoryCondition(query.category)} ${tagCondition(query.tag)} ${topicCondition(query.topicTags)}
+      ${after ? sql`AND (p.timeline_at, p.article_id) < (${after.at}::text::timestamptz, ${after.id})` : sql``}
+    ORDER BY p.timeline_at DESC, p.article_id DESC LIMIT 501`;
+  const page = rows.slice(0, 500);
+  const last = page.at(-1);
+  // Keep PostgreSQL's microseconds in the cursor; binding it as text avoids the driver's Date rounding.
+  return { items: await withPublicInsights(page.map(toFeedItemSummary), sql, now), next: rows.length > page.length && last ? { at: last.export_at, id: last.id } : null };
+}
+
 export async function loadPool(query: PoolQuery): Promise<PoolResponse> {
   const now = query.now ?? new Date();
   const page = Math.min(Math.max(query.page ?? 1, 1), POOL_MAX_PAGES);
@@ -119,8 +140,8 @@ export async function loadPool(query: PoolQuery): Promise<PoolResponse> {
   const filters = sql`${channelCondition(query.channel)} ${categoryCondition(query.category)} ${tagCondition(query.tag)} ${topicCondition(query.topicTags)}`;
   const offset = (page - 1) * POOL_PAGE_SIZE;
   const cap = POOL_MAX_PAGES * POOL_PAGE_SIZE;
-  // A fixed clock (tests, replays) never shares cached totals.
-  const filterKey = query.now ? null : JSON.stringify([query.channel, query.category, query.tag, query.topicTags ?? null]);
+  // Scope decisions can change between requests; totals must follow the same current set as rows.
+  const filterKey = query.now || CONTENT_SCOPE.requireExplicitPass ? null : JSON.stringify([query.channel, query.category, query.tag, query.topicTags ?? null]);
 
   // Searches go through pool_search (eligible items only): trigram indexes for longer terms, a small
   // table to scan for one- and two-character ones.
@@ -193,11 +214,11 @@ export async function loadPool(query: PoolQuery): Promise<PoolResponse> {
   const meta = one(await sql<{ today_count: number; updated_at: Date | null }[]>`
     SELECT (SELECT count(*) FROM publications p
       WHERE ${listedCondition(now)} AND p.eligible AND p.timeline_at >= ${beijingMidnight(today)} ${filters}) AS today_count,
-      (SELECT max(p.updated_at) FROM publications p WHERE p.eligible) AS updated_at`);
+      (SELECT max(p.updated_at) FROM publications p WHERE p.eligible AND ${publicScopeCondition()}) AS updated_at`);
 
   return {
     filters: { channel: query.channel, category: query.category, tag: query.tag, topic: query.topic ?? null, q, tab },
-    items: rows.map(toFeedItemSummary),
+    items: await withPublicInsights(rows.map(toFeedItemSummary), sql, now),
     page,
     pageCount: Math.min(POOL_MAX_PAGES, Math.max(1, Math.ceil(total / POOL_PAGE_SIZE))),
     total,

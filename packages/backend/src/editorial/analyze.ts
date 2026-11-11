@@ -1,7 +1,7 @@
 // analyzeArticle: the judging and writing steps, each with its own prompt from the industry pack
 // (industry/prompts/):
-//   1. prefilter: does the material belong to this industry at all (wide recall). Only BLOCK stops an
-//      item; UNKNOWN goes on like PASS (a BLOCK given while material is missing counts as UNKNOWN);
+//   1. prefilter: the industry's topic gate. Strict scope requires an explicit, source-backed PASS;
+//      UNKNOWN stays internal. Other industry packs can retain their wide-recall behaviour.
 //   2. score: two independent scores against the source tier's threshold (industry/selection.ts) decide 精选;
 //   3. writing: the Chinese title, summary and reason by the content understanding for selected and
 //      near-selected items, by the cheaper title/summary prompts for the rest;
@@ -12,6 +12,8 @@ import { z } from "zod";
 import { CATEGORY_KEYS } from "@aihot/contracts/taxonomy";
 import { CATEGORIES } from "@aihot/industry/taxonomy";
 import { SELECTION } from "@aihot/industry/selection";
+import { CONTENT_SCOPE } from "@aihot/industry/scope";
+import { recordScopeDecision } from "../content/scope.ts";
 import { sql } from "../db.ts";
 import { chatJson, MODELS, ModelOutputError, type ContentPart } from "../providers/llm.ts";
 import { completeReceipt, ProviderRejectedError, ReceiptUnknownError } from "../providers/receipts.ts";
@@ -27,6 +29,7 @@ import {
 } from "./writing.ts";
 import { CATEGORY_BY_ITEM_TYPE, CATEGORY_GUIDE, CATEGORY_TAGS, ENTITIES, ENTITY_TAGS, ITEM_TYPES, normalizeTags, TOPIC_TAGS } from "./vocabulary.ts";
 import { promptText, promptVersion } from "./prompts.ts";
+import { EvaluationExtractionSchema, validateEvaluationEvidence, locateEvidence, type EvaluationExtraction, type CheckedEvaluationEvidence } from "./evidence.ts";
 
 export { buildMaterial, loadAnalyzeInput, type AnalyzeInputArticle };
 
@@ -108,6 +111,7 @@ export function buildScoreInput(a: AnalyzeInputArticle): string {
 const PrefilterSchema = z.object({
   label: z.preprocess((v) => String(v ?? "").trim().toUpperCase(), z.enum(["PASS", "BLOCK", "UNKNOWN"])),
   reason: z.string().max(200).catch(""),
+  scopeEvidence: z.string().trim().min(8).max(1200).nullable().optional().default(null).catch(null),
 });
 
 const FactSchema = z
@@ -126,6 +130,7 @@ const StructureSchema = z.object({
   tags: z.array(z.string()).max(12).catch([]),
   subjects: z.array(z.string()).max(6).catch([]),
   fact: FactSchema,
+  evaluation: EvaluationExtractionSchema.nullable().optional().default(null),
 });
 
 const UnderstandSchema = z.object({
@@ -152,7 +157,7 @@ const STRUCTURE_SYSTEM = promptText("structure", {
 });
 
 export interface AnalysisRun {
-  prefilter: { label: "PASS" | "BLOCK" | "UNKNOWN"; reason: string; model: string; receiptId: number; reused: boolean };
+  prefilter: { label: "PASS" | "BLOCK" | "UNKNOWN"; reason: string; scopeEvidence?: string | null; model: string; receiptId: number; reused: boolean };
   /**
    * The independent score calls and the tier threshold they are held against; absent when the material
    * is not scored. `refused`: the model's content filter declined it, so it is not selected.
@@ -172,7 +177,8 @@ export interface AnalysisRun {
     receiptIds: number[];
     reused: boolean;
   } | null;
-  structure: { model: string; category: string | null; tags: string[]; subjects: string[]; fact: z.infer<typeof FactSchema>; receiptId: number; reused: boolean } | null;
+  structure: { model: string; category: string | null; tags: string[]; subjects: string[]; fact: z.infer<typeof FactSchema>; evaluation?: EvaluationExtraction | null; receiptId: number; reused: boolean } | null;
+  evidence?: CheckedEvaluationEvidence | null;
 }
 
 const isContentFilter = (error: unknown) => error instanceof ProviderRejectedError && !error.retryable && /contentFilter|"1301"/.test(error.message);
@@ -212,8 +218,19 @@ async function runPrefilter(a: AnalyzeInputArticle, opts: StepOpts): Promise<Ana
     attemptTag: opts.attemptTag,
   });
   // A BLOCK without material to back it counts as UNKNOWN (which goes on).
-  const label = res.data.label === "BLOCK" && missingEvidence(a) ? "UNKNOWN" : res.data.label;
-  return { label, reason: res.data.reason, model: res.model, receiptId: res.receiptId, reused: res.reused };
+  let label = res.data.label === "BLOCK" && missingEvidence(a) ? "UNKNOWN" : res.data.label;
+  let reason = res.data.reason;
+  const source = [a.title, a.bodyText ?? a.excerpt ?? "", a.xPost?.text, a.xPost?.quoted?.text].filter(Boolean).join("\n");
+  const scopeEvidence = res.data.scopeEvidence;
+  if (CONTENT_SCOPE.requireExplicitPass && !reason.trim()) {
+    label = "UNKNOWN";
+    reason = "未提供主题准入理由，保留待审";
+  }
+  if (CONTENT_SCOPE.requireExplicitPass && label === "PASS" && (!scopeEvidence || !locateEvidence(source, scopeEvidence))) {
+    label = "UNKNOWN";
+    reason = "评测主题准入缺少可定位的原文依据";
+  }
+  return { label, reason, scopeEvidence: label === "PASS" ? scopeEvidence : null, model: res.model, receiptId: res.receiptId, reused: res.reused };
 }
 
 /** The production prefilter step, exposed separately so SelectBench can preserve partial receipt evidence. */
@@ -296,7 +313,7 @@ async function runStructure(a: AnalyzeInputArticle, opts: StepOpts): Promise<Non
     attemptTag: tagged(opts.attemptTag, "structure"),
   });
   const subjects = [...new Set(res.data.subjects.map((s) => s.trim().toLowerCase()).filter((s) => s in ENTITIES))];
-  return { model: res.model, category: res.data.category, tags: normalizeTags(res.data.tags), subjects, fact: res.data.fact, receiptId: res.receiptId, reused: res.reused };
+  return { model: res.model, category: res.data.category, tags: normalizeTags(res.data.tags), subjects, fact: res.data.fact, evaluation: res.data.evaluation, receiptId: res.receiptId, reused: res.reused };
 }
 
 /** The content understanding; null when the model's content filter declines the material. */
@@ -379,8 +396,8 @@ async function runSummarize(a: AnalyzeInputArticle, opts: StepOpts): Promise<Non
 export async function runAnalysis(a: AnalyzeInputArticle, opts: StepOpts & { stages?: "selection" | "all" } = {}): Promise<AnalysisRun> {
   checkAnalysisRunning();
   const prefilter = await runSelectionPrefilter(a, opts);
-  // UNKNOWN is let through (its material is as complete as it will get); BLOCK stops here.
-  if (prefilter.label === "BLOCK") return { prefilter, scores: null, writing: null, structure: null };
+  // Strict UNKNOWN cannot become public or consume the downstream scoring/writing calls.
+  if (prefilter.label === "BLOCK" || (CONTENT_SCOPE.requireExplicitPass && prefilter.label !== "PASS")) return { prefilter, scores: null, writing: null, structure: null };
   if (opts.stages === "selection") {
     const scores = await runSelectionScores(a, opts);
     return { prefilter, scores, writing: null, structure: null };
@@ -391,10 +408,15 @@ export async function runAnalysis(a: AnalyzeInputArticle, opts: StepOpts & { sta
     const scores = await runSelectionScores(a, opts);
     const sum = scores && !scores.refused && scores.values.length === SCORE_CALLS ? scores.values.reduce((total, v) => total + v, 0) : null;
     const near = sum !== null && (sum >= scores!.threshold * SCORE_CALLS || sum > UNDERSTAND_FLOOR * SCORE_CALLS);
-    const writing = (near ? await runUnderstand(a, opts) : null) ?? (await runSummarize(a, opts));
+    let writing = (near ? await runUnderstand(a, opts) : null) ?? (await runSummarize(a, opts));
     const s = await structure;
     if ("error" in s) throw s.error;
-    return { prefilter, scores, writing, structure: s.value };
+    const evidence = s.value.evaluation ? validateEvaluationEvidence(s.value.evaluation, a, writing ?? undefined) : null;
+    if (evidence?.copyBlocked && writing) {
+      // The paid draft remains in its receipt; unsupported numbers/versions cannot reach publication.
+      writing = { ...writing, titleZh: looksZh(a.title) ? a.title : "", summaryZh: "", reasonZh: null };
+    }
+    return { prefilter, scores, writing, structure: s.value, evidence };
   } finally {
     // A score/writing error or deploy must not let the job finish while a paid structure request
     // still owns a response. It settles and stores its receipt before shutdown can close the DB.
@@ -409,7 +431,7 @@ export function normalizeAnalysis(run: AnalysisRun) {
   const summaryZh = (run.writing?.summaryZh ?? "").trim();
   // Past the prefilter (PASS or UNKNOWN) an item is relevant, but without a usable Chinese title and
   // summary it cannot be published: it waits.
-  const relevance = label === "BLOCK" ? "block" : run.writing && (!titleZh || !summaryZh) ? "unknown" : "pass";
+  const relevance = label === "BLOCK" ? "block" : CONTENT_SCOPE.requireExplicitPass && label !== "PASS" ? "unknown" : run.writing && (!titleZh || !summaryZh) ? "unknown" : "pass";
   // Selected when the two scores add up to twice the tier threshold; the mean, floored,
   // is the score shown (it never decides a half point on its own).
   const values = run.scores && !run.scores.refused ? run.scores.values : null;
@@ -438,6 +460,7 @@ export function normalizeAnalysis(run: AnalysisRun) {
     summaryZh,
     reasonZh: run.writing?.reasonZh ?? null,
     fact: run.structure?.fact ?? null,
+    evaluationType: run.evidence?.evaluationType ?? null,
   };
 }
 
@@ -467,11 +490,13 @@ export async function analyzeArticle(articleId: string, opts: StepOpts = {}): Pr
   ];
   const w = run.writing;
   const detail = {
-    prefilter: { label: run.prefilter.label, reason: run.prefilter.reason },
+    prefilter: { label: run.prefilter.label, reason: run.prefilter.reason, scopeEvidence: run.prefilter.scopeEvidence ?? null },
+    ...(CONTENT_SCOPE.requireExplicitPass ? { scope: { key: CONTENT_SCOPE.key, version: CONTENT_SCOPE.version, decision: run.prefilter.label } } : {}),
     scores: out.scores, scoreModel: out.scoreModel, threshold: out.threshold, ...(out.scoreRefused ? { scoreRefused: true } : {}),
     ...(w ? { writer: w.kind, writerModel: w.model, itemType: w.itemType ?? null, authorRole: w.authorRole ?? null } : {}),
     ...(w?.identityGuard?.outcome === "fallback" ? { identityGuard: w.identityGuard } : {}),
     fact: out.fact,
+    ...(run.evidence ? { evidence: { status: run.evidence.status, issues: run.evidence.issues, validationVersion: run.evidence.validationVersion } } : {}),
   };
   const committed = await sql.begin(async (tx) => {
     const [current] = await tx<{ revision: number }[]>`SELECT revision FROM articles WHERE id = ${articleId} FOR UPDATE`;
@@ -483,6 +508,16 @@ export async function analyzeArticle(articleId: string, opts: StepOpts = {}): Pr
         ${out.relevance}, ${out.category}, ${out.tags}, ${out.subjects}, ${out.titleZh}, ${out.summaryZh}, ${out.reasonZh},
         ${out.score}, ${out.selected}, ${tx.json(detail as never)})
       RETURNING id`;
+    if (run.evidence) {
+      await tx`INSERT INTO article_evidence(analysis_id,article_id,input_revision,evaluation_type,status,payload,checked_at)
+        VALUES (${row!.id},${articleId},${input.revision},${run.evidence.evaluationType},${run.evidence.status},
+          ${tx.json(run.evidence as never)},${new Date(run.evidence.checkedAt)})`;
+    }
+    if (!stale && CONTENT_SCOPE.requireExplicitPass) {
+      await recordScopeDecision(tx, { articleId, inputRevision: input.revision, decision: run.prefilter.label,
+        origin: "prefilter", reason: run.prefilter.reason, evidenceQuote: run.prefilter.scopeEvidence ?? null,
+        analysisId: row!.id, promptVersion: PROMPT_VERSIONS.prefilter });
+    }
     for (const id of receiptIds) await completeReceipt(tx, id);
     if (!stale) {
       await tx`UPDATE articles SET processing_state = ${out.relevance === "block" ? "blocked" : "analyzed"}, processing_error = NULL WHERE id = ${articleId}`;

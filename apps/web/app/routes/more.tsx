@@ -6,6 +6,7 @@ import type { loader as rootLoader } from "../root";
 import { useChangelogDot } from "../components/shell/Sidebar";
 import { pageMeta } from "../lib/seo";
 import { ThemeSwitch } from "../components/shell/ThemeSwitch";
+import { KIND_LABEL, KIND_PATH, KINDS } from "../features/report/format";
 import { IconBookmark, IconChart, IconChevronRight, IconDoc, IconFlame, IconGrid, IconHeart, IconHistory, IconMessage, IconMoon, IconPlug } from "../components/icons";
 
 /** Shared caches may keep this page for five minutes. */
@@ -23,8 +24,11 @@ const GROUPS: Array<{ title: string; rows: Row[] }> = [
   {
     title: "内容",
     rows: [
+      ...KINDS.map((kind) => ({ to: KIND_PATH[kind], label: KIND_LABEL[kind], icon: <IconDoc size={18} /> })),
       { to: "/topics", label: "主题索引", icon: <IconGrid size={18} /> },
       ...(FEATURES.leaderboard ? [{ to: "/leaderboard", label: "模型榜", icon: <IconChart size={18} /> }] : []),
+      ...(FEATURES.leaderboard ? [{ to: "/radar", label: "评测雷达", icon: <IconFlame size={18} /> }] : []),
+      { to: "/papers", label: "论文索引", icon: <IconDoc size={18} /> },
       { to: "/methodology", label: "评测方法", icon: <IconDoc size={18} /> },
       ...(FEATURES.codexResetMonitor ? [{ to: "/codex-reset", label: "Tibo重置监控", icon: <IconHistory size={18} /> }] : []),
       { to: "/agent", label: "Agent 接入", icon: <IconPlug size={18} /> },

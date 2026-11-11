@@ -4,6 +4,10 @@
 // local stubs by the tests that need them, and the push valves stay off. The files share
 // one database and its paid-service budgets, so they run one at a time (package.json).
 import http from "node:http";
+import { CONTENT_SCOPE } from "@aihot/industry/scope";
+
+// Shared framework fixtures do not carry a reviewed site scope decision.
+(CONTENT_SCOPE as { requireExplicitPass: boolean }).requireExplicitPass = false;
 
 const database = new URL(process.env.DATABASE_URL ?? "postgres://unset/unset").pathname.slice(1);
 if (!/_(test|ci)$/.test(database)) {

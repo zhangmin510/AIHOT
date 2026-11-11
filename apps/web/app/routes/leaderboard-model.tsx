@@ -44,7 +44,7 @@ export function meta({ loaderData }: Route.MetaArgs) {
 }
 
 export function headers() {
-  return { "Cache-Control": "public, max-age=0, s-maxage=600, stale-while-revalidate=600" };
+  return { "Cache-Control": "no-store" };
 }
 
 function Eyebrow({ children }: { children: ReactNode }) {
@@ -312,6 +312,10 @@ export default function LeaderboardModelPage() {
           </b>
         </div>
       </header>
+
+      <Link to={`/leaderboard/${model.slug}/history`} className="mb-5 inline-flex items-center gap-1 text-[13px] font-medium text-accent hover:text-accent-ink">
+        查看分来源的评测历史 <IconArrowRight size={14} />
+      </Link>
 
       <section className="grid grid-cols-2 gap-x-4 gap-y-6 border-y border-line py-6 lg:grid-cols-4" aria-label="模型概览">
         <Stat label="分类成绩">

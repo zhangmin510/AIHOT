@@ -157,7 +157,7 @@ interface Page {
 /** A daily without an editors' lead leads with its first highlight (else its first story). */
 function leadStoryOf(report: ReportDetail): ReportCitation | null {
   if (report.lead || report.kind !== "daily") return null;
-  return report.highlights[0] ?? report.sections.find((s) => s.items.length > 0)?.items[0] ?? null;
+  return report.highlights.find((c) => c.available) ?? report.sections.flatMap((s) => s.items).find((c) => c.available) ?? null;
 }
 
 /**
@@ -212,7 +212,7 @@ function FrontPage({ report, pages, leadStory, count }: { report: ReportDetail; 
   const wide = !cover?.width || !cover.height || cover.width / cover.height >= 1.25;
   const title = report.lead?.title ?? leadStory?.title ?? headline(report.kind, report.key, count);
   const dek = report.lead?.leadParagraph ?? leadStory?.summary ?? report.overview;
-  const highlights = report.highlights.filter((h) => !leadStory || keyOf(h) !== keyOf(leadStory)).slice(0, 3);
+  const highlights = report.highlights.filter((h) => h.available && (!leadStory || keyOf(h) !== keyOf(leadStory))).slice(0, 3);
   const inPage = new Set(pages.flatMap((p) => p.items.map((c) => c.itemId)).filter(Boolean));
   const period = daily ? "今日" : report.kind === "weekly" ? "本周" : "本月";
   const index = [...pages.map((p) => ({ id: p.id, label: p.label, n: `${p.items.length} 件` })), ...(report.flashes.length > 0 ? [{ id: "s-flash", label: "快讯", n: `${report.flashes.length} 条` }] : [])];
@@ -390,7 +390,9 @@ export function ReportPaper({ report, index }: { report: ReportDetail; index: Re
               <li key={`${keyOf(f)}-${i}`} className="flex break-inside-avoid gap-2.5 border-b border-line py-3 text-[14.5px] leading-[1.65]">
                 <span className="mt-[9px] size-1.5 shrink-0 rounded-full bg-accent" aria-hidden="true" />
                 <span className="min-w-0">
-                  {f.itemId ? (
+                  {!f.available ? (
+                    <span className="text-ink-4"><span className="line-through">{f.title}</span> · 该内容已按来源方要求下架或调整展示方式。</span>
+                  ) : f.itemId ? (
                     <Link to={`/items/${f.itemId}`} className="text-ink transition-colors hover:text-accent">
                       {f.title}
                     </Link>

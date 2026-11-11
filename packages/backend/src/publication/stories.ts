@@ -2,6 +2,8 @@
 // v1 / MCP / Skill only see ranks and counts.
 import type { HeatPoint, HotResponse, StoryDetail, StoryReportView } from "@aihot/contracts/site";
 import { sql } from "../db.ts";
+import { publicScopeCondition } from "../content/scope.ts";
+import { CONTENT_SCOPE } from "@aihot/industry/scope";
 import { proxiedImage, proxiedImageSet } from "../media/imgproxy.ts";
 import { latestHotRanking, rankingExtras } from "../events/hot-read.ts";
 import { behindSources, sourceClocks } from "../events/hot.ts";
@@ -26,12 +28,12 @@ export async function resolveStory(publicId: string): Promise<StoryLookup> {
       const rows: Array<{ id: number; public_id: string; merged_into: number | null }> = await sql`SELECT id, public_id::text, merged_into FROM stories WHERE id = ${targetId}`;
       const t = rows[0];
       if (!t) return { kind: "not_found" };
-      if (!t.merged_into) return { kind: "merged", target: t.public_id };
+      if (!t.merged_into) return CONTENT_SCOPE.requireExplicitPass && !(await storyReports(t.id, new Date())).length ? { kind: "not_found" } : { kind: "merged", target: t.public_id };
       targetId = t.merged_into;
     }
     return { kind: "not_found" };
   }
-  return { kind: "found", storyId: s!.id, publicId };
+  return CONTENT_SCOPE.requireExplicitPass && !(await storyReports(s!.id, new Date())).length ? { kind: "not_found" } : { kind: "found", storyId: s!.id, publicId };
 }
 
 interface ReportRow {
@@ -64,7 +66,7 @@ async function storyReports(storyId: number, now: Date): Promise<ReportRow[]> {
     FROM facts f JOIN fact_articles fa ON fa.fact_id = f.id JOIN publications p ON p.article_id = fa.article_id
     JOIN sources s ON s.id = p.source_id
     WHERE f.story_id = ${storyId} AND p.visibility = 'public' AND s.participation_mode = 'editorial'
-      AND (NOT p.selected OR p.visible_after <= ${now})
+      AND ${publicScopeCondition()} AND (NOT p.selected OR p.visible_after <= ${now})
     ORDER BY p.article_id, (fa.role = 'primary') DESC`;
 }
 
@@ -88,6 +90,11 @@ async function storyContent(storyId: number, now: Date) {
   const reports = await storyReports(storyId, now);
   if (reports.length === 0) return null;
   reports.sort((a, b) => b.at.getTime() - a.at.getTime());
+  if (CONTENT_SCOPE.requireExplicitPass) {
+    const representative = [...reports].sort((a, b) => Number(b.first_party) - Number(a.first_party) || Number(b.selected) - Number(a.selected) || a.at.getTime() - b.at.getTime())[0]!;
+    Object.assign(s, { title: representative.title, digest: null, digest_updated_at: null, summary: null, latest: null,
+      first_report_at: reports.at(-1)!.at, latest_at: reports[0]!.at });
+  }
 
   const byFact = new Map<number, ReportRow[]>();
   for (const r of reports) byFact.set(r.fact_id, [...(byFact.get(r.fact_id) ?? []), r]);
@@ -99,7 +106,7 @@ async function storyContent(storyId: number, now: Date) {
       const members = byFact.get(f.id)!;
       const rep = [...members].sort((a, b) => Number(b.first_party) - Number(a.first_party) || Number(b.selected) - Number(a.selected) || a.at.getTime() - b.at.getTime())[0]!;
       const first = members.reduce((m, r) => (r.at < m ? r.at : m), members[0]!.at);
-      return { factId: f.public_id, title: f.title, occurredAt: f.occurred_at?.toISOString() ?? null, firstReportAt: first.toISOString(), reportCount: members.length, representative: rep };
+      return { factId: f.public_id, title: CONTENT_SCOPE.requireExplicitPass ? rep.title : f.title, occurredAt: CONTENT_SCOPE.requireExplicitPass ? null : f.occurred_at?.toISOString() ?? null, firstReportAt: first.toISOString(), reportCount: members.length, representative: rep };
     })
     .sort((a, b) => Date.parse(b.firstReportAt) - Date.parse(a.firstReportAt));
 
@@ -107,6 +114,18 @@ async function storyContent(storyId: number, now: Date) {
 }
 
 async function relatedStories(storyId: number) {
+  if (CONTENT_SCOPE.requireExplicitPass) return sql<{ public_id: string; title: string; relation: "storyline" | "related"; latest_at: Date | null }[]>`
+    SELECT st.public_id::text, representative.title, l.relation, representative.at AS latest_at
+    FROM story_links l JOIN stories st ON st.id = l.other_id
+    JOIN LATERAL (
+      SELECT p.title, coalesce(p.published_at, p.discovered_at) AS at
+      FROM facts f JOIN fact_articles fa ON fa.fact_id = f.id JOIN publications p ON p.article_id = fa.article_id
+      JOIN sources s ON s.id = p.source_id
+      WHERE f.story_id = st.id AND p.visibility = 'public' AND s.participation_mode = 'editorial'
+        AND ${publicScopeCondition()} AND (NOT p.selected OR p.visible_after <= now())
+      ORDER BY p.first_party DESC, p.selected DESC, p.timeline_at, p.article_id LIMIT 1
+    ) representative ON true
+    WHERE l.story_id = ${storyId} AND st.merged_into IS NULL ORDER BY representative.at DESC LIMIT 8`;
   return sql<{ public_id: string; title: string; relation: "storyline" | "related"; latest_at: Date | null }[]>`
     SELECT st.public_id::text, st.title, l.relation, st.latest_at FROM story_links l JOIN stories st ON st.id = l.other_id
     WHERE l.story_id = ${storyId} AND st.merged_into IS NULL ORDER BY st.latest_at DESC NULLS LAST LIMIT 8`;
@@ -116,7 +135,8 @@ export async function loadStoryDetail(storyId: number, now = new Date()): Promis
   const content = await storyContent(storyId, now);
   if (!content) return null;
   const { s, reports, developments } = content;
-  const [why] = await sql<{ p48: number; p6: number; r24: number }[]>`
+  const [why] = CONTENT_SCOPE.requireExplicitPass ? [{ p48: new Set(reports.filter(r => r.at.getTime() > now.getTime() - 48 * 3600000).map(r => r.source_id)).size, p6: 0,
+    r24: reports.filter(r => r.at.getTime() > now.getTime() - 24 * 3600000).length }] : await sql<{ p48: number; p6: number; r24: number }[]>`
     SELECT count(DISTINCT participant_key) FILTER (WHERE observed_at > ${now}::timestamptz - interval '48 hours') AS p48,
            count(DISTINCT participant_key) FILTER (WHERE observed_at > ${now}::timestamptz - interval '6 hours'
              AND participant_key NOT IN (SELECT participant_key FROM story_signals x WHERE x.story_id = ${storyId} AND x.observed_at <= ${now}::timestamptz - interval '6 hours')) AS p6,
@@ -125,10 +145,10 @@ export async function loadStoryDetail(storyId: number, now = new Date()): Promis
   const ranking = await latestHotRanking();
   const entry = ranking?.entries.find((e) => e.storyId === storyId) ?? null;
   // Only hours observed in full are drawn (the chart leaves a gap otherwise).
-  const heat = await sql<{ hour: Date; heat: number; participants: number }[]>`
+  const heat = CONTENT_SCOPE.requireExplicitPass ? [] : await sql<{ hour: Date; heat: number; participants: number }[]>`
     SELECT hour, heat, participants FROM story_heat_hourly WHERE story_id = ${storyId} AND complete AND hour > ${now}::timestamptz - interval '7 days' ORDER BY hour`;
   // Complete when none of the sources behind the last 48 hours' participants is behind on collection.
-  const behind = behindSources(await sourceClocks(), now.getTime(), true);
+  const behind = CONTENT_SCOPE.requireExplicitPass ? [] : behindSources(await sourceClocks(), now.getTime(), true);
   const [partial] = behind.length
     ? await sql<{ n: number }[]>`SELECT count(*)::int AS n FROM story_signals WHERE story_id = ${storyId} AND source_id = ANY(${behind}::text[])
                                   AND observed_at > ${now}::timestamptz - interval '48 hours' AND observed_at <= ${now}`
@@ -154,9 +174,9 @@ export async function loadStoryDetail(storyId: number, now = new Date()): Promis
       participants48h: Number(why?.p48 ?? 0),
       newParticipants6h: Number(why?.p6 ?? 0),
       recentReports24h: Number(why?.r24 ?? 0),
-      observationComplete: !partial?.n,
+      observationComplete: !CONTENT_SCOPE.requireExplicitPass && !partial?.n,
       rank: entry?.rank ?? null,
-      heat: entry?.heat ?? null,
+      heat: CONTENT_SCOPE.requireExplicitPass ? null : entry?.heat ?? null,
     },
     developments: developments.map((d) => ({ ...d, representative: reportView(d.representative) })),
     officialReports: reports.filter((r) => r.first_party).slice(0, 12).map(reportView),
@@ -170,6 +190,7 @@ const SPARK_HOURS = 24;
 
 /** Hourly heat of the ranked stories over the day before the ranking, one slot per hour. */
 async function sparklines(storyIds: number[], at: Date): Promise<Map<number, Array<number | null>>> {
+  if (CONTENT_SCOPE.requireExplicitPass) return new Map();
   const end = Math.floor(at.getTime() / 3600000) * 3600000;
   const start = end - SPARK_HOURS * 3600000;
   const rows = storyIds.length
@@ -193,6 +214,7 @@ const coversPending = new Map<number, Promise<HotCoverMap>>();
 
 /** A picture per story from its public full-text reports, the representative first, wide enough for a card. */
 async function hotCovers(rankingId: number, entries: Array<{ storyId: number; representativeItemId: string | null }>, at: Date) {
+  if (CONTENT_SCOPE.requireExplicitPass) return queryHotCovers(entries, at);
   if (coversCache?.rankingId === rankingId) return coversCache.covers;
   const pending = coversPending.get(rankingId);
   if (pending) return pending;
@@ -215,7 +237,7 @@ async function queryHotCovers(entries: Array<{ storyId: number; representativeIt
       SELECT m FROM jsonb_array_elements(coalesce(a.media, '[]'::jsonb)) m
       WHERE m->>'kind' = 'image' AND coalesce((m->>'width')::numeric, 800) >= 480 LIMIT 1
     ) img
-    WHERE p.story_id = ANY(${ids}::bigint[]) AND p.visibility = 'public' AND p.eligible AND p.body_mode <> 'summary'
+    WHERE p.story_id = ANY(${ids}::bigint[]) AND p.visibility = 'public' AND p.eligible AND ${publicScopeCondition()} AND p.body_mode <> 'summary'
       AND (NOT p.selected OR p.visible_after <= ${at})
     ORDER BY p.story_id, (p.article_id::text = ANY(${reps}::text[])) DESC, p.first_party DESC, p.selected DESC, coalesce(p.score, 0) DESC, p.article_id`;
   const covers = new Map(rows.map((c) => [Number(c.story_id), { url: c.m.url, width: typeof c.m.width === "number" ? c.m.width : null, height: typeof c.m.height === "number" ? c.m.height : null }]));

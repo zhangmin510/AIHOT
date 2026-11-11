@@ -21,6 +21,13 @@
     "dev:api": "npm run dev -w @aihot/api",
     "dev:worker": "npm run dev -w @aihot/worker",
     "dev:web": "npm run dev -w @aihot/web",
+    "preview:export": "node scripts/export-cloudflare-preview.ts",
+    "preview:build": "npm run preview:export && CLOUDFLARE_PREVIEW=true SITE_URL=https://b.zhangmin.name npm run build -w @aihot/web && node scripts/prepare-cloudflare-assets.ts",
+    "preview:check": "node --test deploy/cloudflare/*.test.ts && tsc -p deploy/cloudflare",
+    "preview:dev": "CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV=false WRANGLER_SEND_METRICS=false wrangler dev --env-file /dev/null --ip 127.0.0.1 --port 8794",
+    "preview:dry-run": "CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV=false WRANGLER_SEND_METRICS=false wrangler deploy --env-file /dev/null --dry-run",
+    "preview:deploy": "CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV=false WRANGLER_SEND_METRICS=false wrangler deploy --env-file /dev/null",
+    "preview:smoke": "node scripts/smoke-cloudflare-preview.ts",
     "typecheck": "tsc -p packages/contracts && tsc -p packages/backend && tsc -p apps/api && tsc -p apps/worker && tsc -p tests && npm run typecheck -w @aihot/web",
     "test": "node --test --test-concurrency=1 --test-timeout=120000 \"tests/*.test.ts\""
   },
@@ -30,6 +37,7 @@
     "@types/sanitize-html": "2.16.1",
     "@types/turndown": "5.0.6",
     "opentype.js": "1.3.4",
-    "typescript": "7.0.2"
+    "typescript": "7.0.2",
+    "wrangler": "4.157.0"
   }
 }

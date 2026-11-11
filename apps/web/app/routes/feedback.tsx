@@ -1,6 +1,7 @@
 import { SITE, withSubject } from "@aihot/industry/site";
 import { useEffect, useRef, useState } from "react";
-import { Link, useSearchParams } from "react-router";
+import { Link, useRouteLoaderData, useSearchParams } from "react-router";
+import type { loader as rootLoader } from "../root";
 import { Presence } from "../components/ui/Presence";
 import { pageMeta } from "../lib/seo";
 import { KEYS } from "../lib/local-state";
@@ -69,6 +70,20 @@ const MAX_IMAGE = 5 * 1024 * 1024;
 const MAX_TEXT = 2000;
 
 export default function FeedbackPage() {
+  const site = useRouteLoaderData<typeof rootLoader>("root");
+  if (site?.preview?.readOnly) return (
+    <ReadingLayout>
+      <section className="card px-6 py-10">
+        <h1 className="text-[24px] font-semibold text-ink">只读预览暂不接收反馈</h1>
+        <p className="mt-3 text-[14.5px] leading-relaxed text-ink-3">当前站点展示已导出的公开内容快照，反馈提交和截图上传尚未开放。此页不会收集你的邮箱或反馈资料。</p>
+        <Link to="/" className="mt-6 inline-block text-accent hover:underline">返回精选</Link>
+      </section>
+    </ReadingLayout>
+  );
+  return <FeedbackForm />;
+}
+
+function FeedbackForm() {
   const [params] = useSearchParams();
   const [draft, setDraft] = useState<Draft>({ content: "", email: "", pageUrl: params.get("from") ?? "" });
   const [shot, setShot] = useState<{ file: File; url: string } | null>(null);

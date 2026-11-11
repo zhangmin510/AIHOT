@@ -1,5 +1,6 @@
 // Public API v1 (long-term). Field shapes follow reference/public-v1.openapi.json 2.0.0 (the paths stay /api/v1).
-import { FEATURES } from "@aihot/industry/features";
+import { FEATURES, isReportKindEnabled } from "@aihot/industry/features";
+import { isReportKey } from "@aihot/contracts/reports";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { V1_CACHE_CONTROL } from "@aihot/contracts/http-policy";
 import { PUBLIC_API_CATEGORY_KEYS, type PublicApiCategoryKey } from "@aihot/contracts/taxonomy";
@@ -7,7 +8,7 @@ import { InvalidCursorError } from "@aihot/backend/lib/cursor";
 import { SearchBusyError } from "@aihot/backend/publication/pool";
 import { selectedChanges, selectedSnapshot, SnapshotRequiredError, v1Items } from "@aihot/backend/publication/v1";
 import { resolveStory, v1HotTopics, v1Story } from "@aihot/backend/publication/stories";
-import { v1Dailies, v1Daily } from "@aihot/backend/publication/reports";
+import { v1Dailies, v1Daily, v1Reports, v1Report } from "@aihot/backend/publication/reports";
 import { codexResetsRecent, codexResetsSnapshot } from "@aihot/backend/monitor/read";
 import { isValidDate } from "@aihot/contracts/time";
 import { applyPublicHeaders, QueryError, sendJsonWithEtag, sendProblem, strictQuery } from "../http/respond.ts";
@@ -97,12 +98,14 @@ export function registerV1(app: FastifyInstance) {
   }));
 
   app.get("/api/v1/dailies", publicHandler(async (req, reply) => {
+    if (!isReportKindEnabled("daily")) return sendProblem(req, reply, { status: 404, code: "not_found", detail: "Daily reports are unavailable; use /api/v1/reports/weekly or /api/v1/reports/monthly." });
     const q = strictQuery(req, ["limit"]);
     const limit = intParam(q.limit, "limit", 1, 180, 30);
     return sendJsonWithEtag(req, reply, await v1Dailies(limit), { etagPrefix: "v1-dailies", cacheControl: V1_CACHE_CONTROL.dailies });
   }));
 
   app.get("/api/v1/dailies/latest", publicHandler(async (req, reply) => {
+    if (!isReportKindEnabled("daily")) return sendProblem(req, reply, { status: 404, code: "not_found", detail: "Daily reports are unavailable; use /api/v1/reports/weekly/latest or /api/v1/reports/monthly/latest." });
     strictQuery(req, []);
     const body = await v1Daily("latest");
     if (!body) return sendProblem(req, reply, { status: 404, code: "not_found", detail: "No daily report has been published yet." });
@@ -110,12 +113,31 @@ export function registerV1(app: FastifyInstance) {
   }));
 
   app.get("/api/v1/dailies/:date", publicHandler(async (req, reply) => {
+    if (!isReportKindEnabled("daily")) return sendProblem(req, reply, { status: 404, code: "not_found", detail: "Daily reports are unavailable; use /api/v1/reports/weekly or /api/v1/reports/monthly." });
     strictQuery(req, []);
     const date = (req.params as { date: string }).date;
     if (!isValidDate(date)) throw new QueryError("date must be a real YYYY-MM-DD calendar date.");
     const body = await v1Daily(date);
     if (!body) return sendProblem(req, reply, { status: 404, code: "not_found", detail: `No daily report exists for ${date}.`, cacheControl: "public, max-age=60" });
     return sendJsonWithEtag(req, reply, body, { etagPrefix: "v1-daily", cacheControl: V1_CACHE_CONTROL.dailyByDate });
+  }));
+
+  app.get("/api/v1/reports/:kind", publicHandler(async (req, reply) => {
+    const kind = (req.params as { kind: string }).kind;
+    if (!isReportKindEnabled(kind)) return sendProblem(req, reply, { status: 404, code: "not_found", detail: "Report kind is unavailable; use weekly or monthly." });
+    const q = strictQuery(req, ["limit"]);
+    const body = await v1Reports(kind, intParam(q.limit, "limit", 1, 180, 30));
+    return sendJsonWithEtag(req, reply, body, { etagPrefix: "v1-reports", cacheControl: V1_CACHE_CONTROL.dailies });
+  }));
+
+  app.get("/api/v1/reports/:kind/:key", publicHandler(async (req, reply) => {
+    const { kind, key } = req.params as { kind: string; key: string };
+    if (!isReportKindEnabled(kind)) return sendProblem(req, reply, { status: 404, code: "not_found", detail: "Report kind is unavailable; use weekly or monthly." });
+    strictQuery(req, []);
+    if (key !== "latest" && !isReportKey(kind, key)) throw new QueryError("key must identify a real report period (YYYY-Www or YYYY-MM).");
+    const body = await v1Report(kind, key);
+    if (!body) return sendProblem(req, reply, { status: 404, code: "not_found", detail: `No ${kind} report exists for ${key}.`, cacheControl: "public, max-age=60" });
+    return sendJsonWithEtag(req, reply, body, { etagPrefix: "v1-report", cacheControl: key === "latest" ? V1_CACHE_CONTROL.latestDaily : V1_CACHE_CONTROL.dailyByDate });
   }));
 
   app.get("/api/v1/selected/snapshot", publicHandler(async (req, reply) => {

@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { REPO_ROOT } from "../config.ts";
 import { sql } from "../db.ts";
+import { publicScopeCondition } from "../content/scope.ts";
+import { CONTENT_SCOPE } from "@aihot/industry/scope";
 import { cached } from "../lib/cache.ts";
 import { ITEM_COLUMNS, ITEM_FROM, selectedCondition, toFeedItemSummary, type ItemRow } from "./items.ts";
 
@@ -71,7 +73,7 @@ export const TOPIC_PAGE_SIZE = 20;
 
 /** Topic pages exist for every topic; only topics with enough content are listed and indexed. */
 export function topicPageCounts(): Promise<TopicCount[]> {
-  return countsCache.get();
+  return CONTENT_SCOPE.requireExplicitPass ? queryTopicCounts() : countsCache.get();
 }
 
 /**
@@ -81,7 +83,7 @@ export function topicPageCounts(): Promise<TopicCount[]> {
 async function queryTopicCounts(): Promise<TopicCount[]> {
   const [topics, items] = await Promise.all([
     sql<Array<Pick<TopicRow, "slug" | "entity_id" | "tags">>>`SELECT slug, entity_id, tags FROM topics ORDER BY position`,
-    sql<{ tags: string[]; timeline_at: Date }[]>`SELECT p.tags, p.timeline_at FROM publications p WHERE p.visibility = 'public' AND p.selected`,
+    sql<{ tags: string[]; timeline_at: Date }[]>`SELECT p.tags, p.timeline_at FROM publications p WHERE p.visibility = 'public' AND p.selected AND ${publicScopeCondition()}`,
   ]);
   const recentFrom = Date.now() - 30 * 86400_000;
   return topics.map((t) => {
@@ -138,10 +140,10 @@ export async function loadTopicPage(slug: string, page: number, now = new Date()
   const rows = await sql<ItemRow[]>`
     WITH page AS (
       SELECT p.article_id FROM publications p
-      WHERE ${selectedCondition(now)} AND p.tags && ${topicMatchTags(row)}::text[]
+      WHERE ${selectedCondition(now)} AND ${publicScopeCondition()} AND p.tags && ${topicMatchTags(row)}::text[]
       ORDER BY p.timeline_at DESC, p.article_id DESC
       LIMIT ${TOPIC_PAGE_SIZE} OFFSET ${(page - 1) * TOPIC_PAGE_SIZE})
-    SELECT ${ITEM_COLUMNS} ${ITEM_FROM} WHERE p.article_id IN (SELECT article_id FROM page)
+    SELECT ${ITEM_COLUMNS} ${ITEM_FROM} WHERE p.article_id IN (SELECT article_id FROM page) AND ${publicScopeCondition()}
     ORDER BY p.timeline_at DESC, p.article_id DESC`;
   const related = row.related.map((r) => topics.find((t) => t.slug === r)).filter((t): t is TopicSummary => !!t).map((t) => ({ slug: t.slug, name: t.name }));
   return { topic: { ...topic, related }, items: rows.map(toFeedItemSummary), page, pageCount };

@@ -1,10 +1,12 @@
 import { request as httpRequest } from "node:http";
+import path from "node:path";
 import { reactRouter } from "@react-router/dev/vite";
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig, type Plugin } from "vite";
 import { isApiOwned, resolveRedirect } from "@aihot/contracts/http-policy";
 
 const API = new URL(process.env.API_BASE_URL || "http://127.0.0.1:3001");
+const cloudflarePreview = process.env.CLOUDFLARE_PREVIEW === "true";
 
 /** Development stand-in for the production web server: the shared redirect table and api-owned path routing. */
 function devEdge(): Plugin {
@@ -44,6 +46,13 @@ function devEdge(): Plugin {
 
 export default defineConfig({
   plugins: [devEdge(), tailwindcss(), reactRouter()],
+  ...(cloudflarePreview ? {
+    resolve: { alias: [
+      { find: "/app/entry.server.tsx", replacement: path.resolve(import.meta.dirname, "app/entry.server.cloudflare.tsx") },
+      { find: path.resolve(import.meta.dirname, "app/entry.server.tsx"), replacement: path.resolve(import.meta.dirname, "app/entry.server.cloudflare.tsx") },
+    ] },
+    define: { "process.env.CLOUDFLARE_PREVIEW": '"true"', "process.env.AIHOT_PREVIEW": '"true"' },
+  } : {}),
   server: { port: 3000, strictPort: true },
   build: {
     rolldownOptions: {

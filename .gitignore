@@ -9,7 +9,9 @@ dist/
 
 # Web production build
 apps/web/build/
+apps/web/build-cloudflare/
 apps/web/.react-router/
+.wrangler/
 
 # Font package unpacked to regenerate the report nameplates (docs/customize.md)
 package/
