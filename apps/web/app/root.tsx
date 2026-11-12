@@ -7,6 +7,8 @@ import {
 import type { ReactNode } from "react";
 import type { Route } from "./+types/root";
 import "./app.css";
+import "./portfolio-navigation.css";
+import { PortfolioNavigation } from "./components/shell/PortfolioNavigation";
 import { Sidebar } from "./components/shell/Sidebar";
 import { MobileTabBar } from "./components/shell/MobileTabBar";
 import { BackToTop, NavigationProgress } from "./components/shell/Chrome";
@@ -84,6 +86,7 @@ function SiteShell({ changelogVersion, deploymentPreview = false, preview, child
           up to the list width (--page-max-wide), centred beyond it. */}
       <main id="main" className="min-w-0 flex-1 pb-[calc(72px+env(safe-area-inset-bottom))] lg:px-7 lg:pb-[72px] lg:pt-6">
         <div className="mx-auto w-full max-w-[640px] px-4 lg:max-w-[var(--page-max-wide)] lg:px-0">
+          <PortfolioNavigation />
           {(deploymentPreview || preview?.readOnly) && <p role="status" className="mb-4 rounded-card border border-line bg-surface px-4 py-3 text-[13px] leading-relaxed text-ink-3">
             {preview?.readOnly ? <>只读预览站 · 当前展示现有公开内容的快照，由运营者手动更新。
               {preview.exportedAt && Number.isFinite(Date.parse(preview.exportedAt)) && <> 快照导出于 <time dateTime={preview.exportedAt}>{new Date(preview.exportedAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false })}</time>（UTC+8）。</>}
